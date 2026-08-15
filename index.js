@@ -2,7 +2,29 @@ const http = require("http");
 
 const PORT = process.env.PORT || 10000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "finanzas-ia-token";
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const WABA_ID = "1363654319277230";
+async function suscribirWhatsApp() {
+  try {
+    const respuesta = await fetch(
+      `https://graph.facebook.com/${WABA_ID}/subscribed_apps?subscribed_fields=messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
 
+    const datos = await respuesta.json();
+    console.log("Suscripción WhatsApp:", datos);
+  } catch (error) {
+    console.error("Error al suscribir WhatsApp:", error);
+  }
+}
+
+suscribirWhatsApp();
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 if (req.method === "GET" && url.pathname === "/privacy") {
