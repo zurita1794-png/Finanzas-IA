@@ -4,6 +4,11 @@ const PORT = process.env.PORT || 10000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "finanzas-ia-token";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+console.log("Diagnóstico OpenAI:", {
+  existe: Boolean(OPENAI_API_KEY),
+  empiezaConSk: OPENAI_API_KEY?.startsWith("sk-"),
+  longitud: OPENAI_API_KEY?.length
+});
 
 const WABA_ID = "1363654319277230";
 const PHONE_NUMBER_ID = "1327077313815752";
