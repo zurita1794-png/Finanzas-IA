@@ -1,970 +1,1184 @@
-const http = require("http");
+const SPREADSHEET_ID =
+  "1-5gZyFmGaE042r5wJEikPG2ixkbFCFWnYQiMnHHy12w";
 
-const PORT = process.env.PORT || 10000;
-const VERIFY_TOKEN =
-  process.env.VERIFY_TOKEN || "finanzas-ia-token";
-
-const WHATSAPP_TOKEN =
-  process.env.WHATSAPP_TOKEN;
-
-const GEMINI_API_KEY =
-  process.env.GEMINI_API_KEY;
-
-const APPS_SCRIPT_URL =
-  process.env.APPS_SCRIPT_URL;
-
-const APPS_SCRIPT_SECRET =
-  process.env.APPS_SCRIPT_SECRET;
-
-const WABA_ID = "1363654319277230";
-const PHONE_NUMBER_ID = "1327077313815752";
-
-const mensajesProcesados = new Set();
-
-/*
-  Guarda temporalmente una conversación pendiente
-  para cada número de WhatsApp.
-*/
-const conversaciones = new Map();
-
-const CAMPOS_REQUERIDOS = {
-  Super: [
-    "Producto",
-    "Fecha",
-    "Cantidad",
-    "Costo",
-    "Estado"
-  ],
-
-  Pagos: [
-    "Servicio",
-    "Fecha",
-    "Monto",
-    "Notas",
-    "Estado"
-  ],
-
-  Ingresos: [
-    "Concepto",
-    "Fecha",
-    "Monto"
-  ]
+const CONFIG_HOJAS = {
+  Super: {
+    campoClave: "Producto",
+    prefijo: "S"
+  },
+  Pagos: {
+    campoClave: "Servicio",
+    prefijo: "P"
+  },
+  Ingresos: {
+    campoClave: "Concepto",
+    prefijo: "I"
+  }
 };
 
-function estaVacio(valor) {
-  return (
-    valor === undefined ||
-    valor === null ||
-    String(valor).trim() === ""
-  );
+function doGet() {
+  return respuestaJSON({
+    ok: true,
+    mensaje: "Finanzas IA Google Sheets activo"
+  });
 }
 
-function siguienteCampoFaltante(sheet, data) {
-  const campos =
-    CAMPOS_REQUERIDOS[sheet] || [];
-
-  return campos.find(
-    campo => estaVacio(data[campo])
-  );
-}
-
-function obtenerPregunta(sheet, campo, data) {
-  if (campo === "Fecha") {
-    return "¿Qué fecha le pongo?";
-  }
-
-  if (sheet === "Super") {
-    if (campo === "Cantidad") {
-      return `¿Qué cantidad de ${data.Producto} quieres registrar?`;
-    }
-
-    if (campo === "Costo") {
-      return `¿Cuál es el costo de ${data.Producto}?`;
-    }
-
-    if (campo === "Estado") {
-      return "¿Cuál es el estado? Por ejemplo: Pendiente o Comprado.";
-    }
-  }
-
-  if (sheet === "Pagos") {
-    if (campo === "Monto") {
-      return `¿Cuál es el monto de ${data.Servicio}?`;
-    }
-
-    if (campo === "Notas") {
-      return '¿Qué nota quieres agregar? Si no necesitas una, responde "sin notas".';
-    }
-
-    if (campo === "Estado") {
-      return "¿Cuál es el estado del pago? Por ejemplo: Pendiente, Por pagar o Pagado.";
-    }
-  }
-
-  if (sheet === "Ingresos") {
-    if (campo === "Monto") {
-      return `¿Cuál es el monto de ${data.Concepto}?`;
-    }
-  }
-
-  return `¿Cuál es el valor de ${campo}?`;
-}
-
-async function enviarMensajeWhatsApp(
-  destinatario,
-  texto
-) {
+function doPost(e) {
   try {
-    const respuesta = await fetch(
-      `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        method: "POST",
-        headers: {
-          Authorization:
-            `Bearer ${WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: destinatario,
-          type: "text",
-          text: {
-            body: texto
-          }
-        })
+    const datos = JSON.parse(
+      e.postData.contents || "{}"
+    );
+
+    verificarSecreto(datos.secret);
+
+    const accion =
+      datos.action || "registrar";
+
+    if (accion === "registrar") {
+      return respuestaJSON(
+        registrar(datos.sheet, datos.data)
+      );
+    }
+
+    if (accion === "buscar_eliminar") {
+      return respuestaJSON(
+        buscarParaEliminar(
+          datos.sheet,
+          datos.buscar
+        )
+      );
+    }
+
+    if (accion === "eliminar") {
+      return respuestaJSON(
+        eliminarRegistro(
+          datos.sheet,
+          datos.fila,
+          datos.esperado
+        )
+      );
+    }
+
+    if (accion === "reporte") {
+      actualizarReporteMensual();
+
+      return respuestaJSON(
+        obtenerReporte(datos.mes)
+      );
+    }
+
+    if (accion === "actualizar_reporte") {
+      actualizarReporteMensual();
+
+      return respuestaJSON({
+        ok: true,
+        mensaje: "Reporte actualizado"
+      });
+    }
+
+    throw new Error(
+      `Acción no reconocida: ${accion}`
+    );
+
+  } catch (error) {
+    return respuestaJSON({
+      ok: false,
+      error: error.message
+    });
+  }
+}
+
+function verificarSecreto(
+  secretoRecibido
+) {
+  const secretoGuardado =
+    PropertiesService
+      .getScriptProperties()
+      .getProperty("API_SECRET");
+
+  if (!secretoGuardado) {
+    throw new Error(
+      "Falta configurar API_SECRET."
+    );
+  }
+
+  if (
+    secretoRecibido !==
+    secretoGuardado
+  ) {
+    throw new Error(
+      "Acceso no autorizado."
+    );
+  }
+}
+
+function registrar(
+  nombreHoja,
+  datos
+) {
+  const lock =
+    LockService.getScriptLock();
+
+  lock.waitLock(30000);
+
+  try {
+    if (!nombreHoja) {
+      throw new Error(
+        "Falta indicar la hoja."
+      );
+    }
+
+    if (
+      !datos ||
+      typeof datos !== "object"
+    ) {
+      throw new Error(
+        "Faltan los datos."
+      );
+    }
+
+    const config =
+      CONFIG_HOJAS[nombreHoja];
+
+    if (!config) {
+      throw new Error(
+        `La hoja "${nombreHoja}" no está configurada.`
+      );
+    }
+
+    const archivo =
+      SpreadsheetApp.openById(
+        SPREADSHEET_ID
+      );
+
+    const hoja =
+      archivo.getSheetByName(
+        nombreHoja
+      );
+
+    if (!hoja) {
+      throw new Error(
+        `No existe la hoja "${nombreHoja}".`
+      );
+    }
+
+    const encabezados =
+      obtenerEncabezados(hoja);
+
+    const valorClave =
+      String(
+        datos[config.campoClave] || ""
+      ).trim();
+
+    if (!valorClave) {
+      throw new Error(
+        `Falta "${config.campoClave}".`
+      );
+    }
+
+    const id =
+      obtenerIdPermanente(
+        nombreHoja,
+        hoja,
+        encabezados,
+        config,
+        valorClave
+      );
+
+    const datosFinales = {
+      ...datos,
+      ID: id
+    };
+
+    const nuevaFila =
+      encabezados.map(
+        encabezado =>
+          prepararValor(
+            encabezado,
+            datosFinales[encabezado]
+          )
+      );
+
+    hoja.appendRow(nuevaFila);
+
+    actualizarReporteMensual();
+
+    return {
+      ok: true,
+      hoja: nombreHoja,
+      id: id,
+      fila: hoja.getLastRow()
+    };
+
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function obtenerIdPermanente(
+  nombreHoja,
+  hoja,
+  encabezados,
+  config,
+  valorClave
+) {
+  const properties =
+    PropertiesService
+      .getScriptProperties();
+
+  const nombrePropiedad =
+    `ID_MAP_${nombreHoja.toUpperCase()}`;
+
+  let mapa = {};
+
+  try {
+    mapa = JSON.parse(
+      properties.getProperty(
+        nombrePropiedad
+      ) || "{}"
+    );
+  } catch {
+    mapa = {};
+  }
+
+  const columnaId =
+    encabezados.indexOf("ID");
+
+  const columnaClave =
+    encabezados.indexOf(
+      config.campoClave
+    );
+
+  if (
+    columnaId === -1 ||
+    columnaClave === -1
+  ) {
+    throw new Error(
+      "Faltan columnas necesarias para los ID."
+    );
+  }
+
+  const ultimaFila =
+    hoja.getLastRow();
+
+  if (ultimaFila > 1) {
+    const registros =
+      hoja.getRange(
+        2,
+        1,
+        ultimaFila - 1,
+        encabezados.length
+      ).getDisplayValues();
+
+    registros.forEach(fila => {
+      const clave =
+        normalizarTexto(
+          fila[columnaClave]
+        );
+
+      const id =
+        String(
+          fila[columnaId] || ""
+        ).trim();
+
+      if (
+        clave &&
+        id &&
+        !mapa[clave]
+      ) {
+        mapa[clave] = id;
+      }
+    });
+  }
+
+  const claveNueva =
+    normalizarTexto(valorClave);
+
+  if (mapa[claveNueva]) {
+    properties.setProperty(
+      nombrePropiedad,
+      JSON.stringify(mapa)
+    );
+
+    return mapa[claveNueva];
+  }
+
+  let mayor = 0;
+
+  Object.values(mapa)
+    .forEach(id => {
+      const numero =
+        extraerNumeroId(
+          id,
+          config.prefijo
+        );
+
+      if (numero > mayor) {
+        mayor = numero;
+      }
+    });
+
+  if (ultimaFila > 1) {
+    const ids =
+      hoja.getRange(
+        2,
+        columnaId + 1,
+        ultimaFila - 1,
+        1
+      ).getDisplayValues().flat();
+
+    ids.forEach(id => {
+      const numero =
+        extraerNumeroId(
+          id,
+          config.prefijo
+        );
+
+      if (numero > mayor) {
+        mayor = numero;
+      }
+    });
+  }
+
+  const siguiente =
+    mayor + 1;
+
+  const nuevoId =
+    `${config.prefijo}-${String(
+      siguiente
+    ).padStart(2, "0")}`;
+
+  mapa[claveNueva] =
+    nuevoId;
+
+  properties.setProperty(
+    nombrePropiedad,
+    JSON.stringify(mapa)
+  );
+
+  return nuevoId;
+}
+
+function extraerNumeroId(
+  id,
+  prefijo
+) {
+  const patron =
+    new RegExp(
+      `^${prefijo}-(\\d+)$`,
+      "i"
+    );
+
+  const coincidencia =
+    String(id || "")
+      .trim()
+      .match(patron);
+
+  if (!coincidencia) {
+    return 0;
+  }
+
+  return Number(
+    coincidencia[1]
+  );
+}
+
+function buscarParaEliminar(
+  nombreHoja,
+  buscar
+) {
+  if (!CONFIG_HOJAS[nombreHoja]) {
+    throw new Error(
+      "Solo se pueden eliminar registros de Super, Pagos o Ingresos."
+    );
+  }
+
+  const archivo =
+    SpreadsheetApp.openById(
+      SPREADSHEET_ID
+    );
+
+  const hoja =
+    archivo.getSheetByName(
+      nombreHoja
+    );
+
+  if (!hoja) {
+    throw new Error(
+      `No existe la hoja "${nombreHoja}".`
+    );
+  }
+
+  const encabezados =
+    obtenerEncabezados(hoja);
+
+  const config =
+    CONFIG_HOJAS[nombreHoja];
+
+  const indiceClave =
+    encabezados.indexOf(
+      config.campoClave
+    );
+
+  const indiceId =
+    encabezados.indexOf("ID");
+
+  const ultimaFila =
+    hoja.getLastRow();
+
+  if (ultimaFila <= 1) {
+    return {
+      ok: true,
+      coincidencias: []
+    };
+  }
+
+  const registros =
+    hoja.getRange(
+      2,
+      1,
+      ultimaFila - 1,
+      encabezados.length
+    ).getDisplayValues();
+
+  const buscado =
+    normalizarTexto(buscar);
+
+  let encontrados =
+    registros
+      .map((fila, indice) => ({
+        fila: indice + 2,
+        valores: fila
+      }))
+      .filter(item => {
+        const clave =
+          normalizarTexto(
+            item.valores[
+              indiceClave
+            ]
+          );
+
+        const id =
+          normalizarTexto(
+            item.valores[
+              indiceId
+            ]
+          );
+
+        return (
+          clave === buscado ||
+          id === buscado
+        );
+      });
+
+  if (
+    encontrados.length === 0
+  ) {
+    encontrados =
+      registros
+        .map((fila, indice) => ({
+          fila: indice + 2,
+          valores: fila
+        }))
+        .filter(item => {
+          const clave =
+            normalizarTexto(
+              item.valores[
+                indiceClave
+              ]
+            );
+
+          return clave.includes(
+            buscado
+          );
+        });
+  }
+
+  const coincidencias =
+    encontrados.map(item => {
+      const registro = {};
+
+      encabezados.forEach(
+        (encabezado, indice) => {
+          registro[encabezado] =
+            item.valores[indice];
+        }
+      );
+
+      return {
+        fila: item.fila,
+        data: registro
+      };
+    });
+
+  return {
+    ok: true,
+    hoja: nombreHoja,
+    coincidencias
+  };
+}
+
+function eliminarRegistro(
+  nombreHoja,
+  numeroFila,
+  esperado
+) {
+  const lock =
+    LockService.getScriptLock();
+
+  lock.waitLock(30000);
+
+  try {
+    if (!CONFIG_HOJAS[nombreHoja]) {
+      throw new Error(
+        "Hoja no válida para eliminar."
+      );
+    }
+
+    const fila =
+      Number(numeroFila);
+
+    if (
+      !Number.isInteger(fila) ||
+      fila < 2
+    ) {
+      throw new Error(
+        "Fila no válida."
+      );
+    }
+
+    const archivo =
+      SpreadsheetApp.openById(
+        SPREADSHEET_ID
+      );
+
+    const hoja =
+      archivo.getSheetByName(
+        nombreHoja
+      );
+
+    if (
+      !hoja ||
+      fila > hoja.getLastRow()
+    ) {
+      throw new Error(
+        "El registro ya no existe."
+      );
+    }
+
+    const encabezados =
+      obtenerEncabezados(hoja);
+
+    const valores =
+      hoja.getRange(
+        fila,
+        1,
+        1,
+        encabezados.length
+      ).getDisplayValues()[0];
+
+    const actual = {};
+
+    encabezados.forEach(
+      (encabezado, indice) => {
+        actual[encabezado] =
+          valores[indice];
       }
     );
 
-    const datos =
-      await respuesta.json();
+    if (
+      esperado &&
+      typeof esperado === "object"
+    ) {
+      for (
+        const encabezado
+        of encabezados
+      ) {
+        const a =
+          normalizarComparacion(
+            actual[encabezado]
+          );
 
-    console.log(
-      "Respuesta WhatsApp:",
-      datos
-    );
+        const b =
+          normalizarComparacion(
+            esperado[encabezado]
+          );
 
-    return datos;
-
-  } catch (error) {
-    console.error(
-      "Error enviando WhatsApp:",
-      error
-    );
-  }
-}
-
-function extraerJSON(texto) {
-  const limpio = texto
-    .replace(/```json/gi, "")
-    .replace(/```/g, "")
-    .trim();
-
-  return JSON.parse(limpio);
-}
-
-function fechaActualMexico() {
-  return new Intl.DateTimeFormat(
-    "es-MX",
-    {
-      timeZone: "America/Mexico_City",
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric"
-    }
-  ).format(new Date());
-}
-
-async function interpretarConGemini(
-  textoUsuario,
-  contextoActual = null
-) {
-  if (!GEMINI_API_KEY) {
-    throw new Error(
-      "Falta GEMINI_API_KEY."
-    );
-  }
-
-  const hoy =
-    fechaActualMexico();
-
-  const campoEsperado =
-    contextoActual
-      ? siguienteCampoFaltante(
-          contextoActual.sheet,
-          contextoActual.data
-        )
-      : null;
-
-  const instrucciones = `
-Eres Finanzas IA, un asistente personal privado que funciona por WhatsApp.
-
-RESPONDE ÚNICAMENTE CON JSON VÁLIDO.
-No uses markdown.
-No escribas nada fuera del JSON.
-
-Fecha actual en Ciudad de México:
-${hoy}
-
-HOJAS DISPONIBLES:
-
-Super:
-Producto, Fecha, Cantidad, Costo, Estado
-
-Pagos:
-Servicio, Fecha, Monto, Notas, Estado
-
-Ingresos:
-Concepto, Fecha, Monto
-
-IMPORTANTE:
-
-- El campo ID NO lo generas tú.
-- Google Sheets genera y reutiliza los ID.
-- No inventes ningún dato.
-- No completes automáticamente campos faltantes.
-- Solo registra valores que el usuario haya dicho.
-- Si el usuario dice "hoy", puedes convertirlo a la fecha actual.
-- Si dice "sin notas", usa exactamente "Sin notas".
-- No supongas Estado.
-- No supongas Cantidad.
-- No supongas Costo.
-- No supongas Fecha.
-- No supongas Monto.
-
-Si ya existe una conversación pendiente, interpreta el nuevo mensaje como respuesta al campo que se está preguntando.
-
-Por ejemplo:
-Si el campo esperado es Cantidad y responde "2",
-debes devolver Cantidad = "2".
-
-Si el campo esperado es Costo y responde "35 pesos",
-debes devolver Costo = "35".
-
-Si el campo esperado es Estado y responde "pendiente",
-debes devolver Estado = "Pendiente".
-
-Si el campo esperado es Fecha y responde "hoy",
-debes devolver Fecha = "${hoy}".
-
-FORMATO DE RESPUESTA:
-
-Para registrar o continuar un registro:
-
-{
-  "accion": "registrar",
-  "sheet": "Super",
-  "data": {
-    "Producto": ""
-  },
-  "respuesta": ""
-}
-
-Usa únicamente los campos que realmente hayas entendido.
-
-Para cancelar un registro:
-
-{
-  "accion": "cancelar",
-  "respuesta": "Registro cancelado."
-}
-
-Para una conversación que no sea un registro:
-
-{
-  "accion": "conversar",
-  "respuesta": "..."
-}
-
-Si existe una conversación pendiente:
-- conserva la misma hoja;
-- conserva todos los datos anteriores;
-- agrega únicamente la nueva información;
-- si el usuario corrige explícitamente un dato anterior, puedes modificarlo.
-`.trim();
-
-  let entrada;
-
-  if (contextoActual) {
-    entrada = `
-REGISTRO PENDIENTE:
-
-Hoja:
-${contextoActual.sheet}
-
-Datos actuales:
-${JSON.stringify(contextoActual.data)}
-
-Campo que estamos esperando:
-${campoEsperado}
-
-Nuevo mensaje del usuario:
-${textoUsuario}
-`.trim();
-  } else {
-    entrada = textoUsuario;
-  }
-
-  const respuesta = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type":
-          "application/json",
-
-        "x-goog-api-key":
-          GEMINI_API_KEY
-      },
-
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [
-            {
-              text: instrucciones
-            }
-          ]
-        },
-
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: entrada
-              }
-            ]
-          }
-        ],
-
-        generationConfig: {
-          responseMimeType:
-            "application/json"
+        if (a !== b) {
+          throw new Error(
+            "El registro cambió antes de eliminarse. Vuelve a buscarlo."
+          );
         }
-      })
+      }
     }
+
+    hoja.deleteRow(fila);
+
+    actualizarReporteMensual();
+
+    return {
+      ok: true,
+      eliminado: actual
+    };
+
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function actualizarReporteMensual() {
+  const archivo =
+    SpreadsheetApp.openById(
+      SPREADSHEET_ID
+    );
+
+  const hojaReporte =
+    archivo.getSheetByName(
+      "Reporte mensual"
+    );
+
+  if (!hojaReporte) {
+    return;
+  }
+
+  const resumen = {};
+
+  function asegurarMes(clave) {
+    if (!resumen[clave]) {
+      resumen[clave] = {
+        ingresos: 0,
+        pagos: 0,
+        super: 0,
+        pendientes: 0
+      };
+    }
+
+    return resumen[clave];
+  }
+
+  procesarIngresos(
+    archivo,
+    asegurarMes
   );
 
-  const datos =
-    await respuesta.json();
+  procesarPagos(
+    archivo,
+    asegurarMes
+  );
 
-  if (!respuesta.ok) {
-    console.error(
-      "Error Gemini:",
-      JSON.stringify(datos, null, 2)
+  procesarSuper(
+    archivo,
+    asegurarMes
+  );
+
+  const encabezados = [
+    "Mes",
+    "Ingresos",
+    "Pagos realizados",
+    "Súper comprado",
+    "Gastos totales",
+    "Saldo",
+    "Pagos pendientes"
+  ];
+
+  hojaReporte
+    .getRange(
+      1,
+      1,
+      1,
+      encabezados.length
+    )
+    .setValues([
+      encabezados
+    ]);
+
+  const ultimaFila =
+    hojaReporte.getLastRow();
+
+  if (ultimaFila > 1) {
+    hojaReporte
+      .getRange(
+        2,
+        1,
+        ultimaFila - 1,
+        encabezados.length
+      )
+      .clearContent();
+  }
+
+  const meses =
+    Object.keys(resumen).sort();
+
+  if (meses.length === 0) {
+    return;
+  }
+
+  const filas =
+    meses.map(clave => {
+      const mes =
+        resumen[clave];
+
+      const gastos =
+        mes.pagos +
+        mes.super;
+
+      const saldo =
+        mes.ingresos -
+        gastos;
+
+      return [
+        nombreMes(clave),
+        mes.ingresos,
+        mes.pagos,
+        mes.super,
+        gastos,
+        saldo,
+        mes.pendientes
+      ];
+    });
+
+  hojaReporte
+    .getRange(
+      2,
+      1,
+      filas.length,
+      encabezados.length
+    )
+    .setValues(filas);
+}
+
+function procesarIngresos(
+  archivo,
+  asegurarMes
+) {
+  const hoja =
+    archivo.getSheetByName(
+      "Ingresos"
     );
 
+  if (!hoja) return;
+
+  const registros =
+    obtenerRegistros(hoja);
+
+  registros.forEach(registro => {
+    const clave =
+      obtenerClaveMes(
+        registro.Fecha
+      );
+
+    if (!clave) return;
+
+    asegurarMes(clave)
+      .ingresos +=
+        numeroDesdeValor(
+          registro.Monto
+        );
+  });
+}
+
+function procesarPagos(
+  archivo,
+  asegurarMes
+) {
+  const hoja =
+    archivo.getSheetByName(
+      "Pagos"
+    );
+
+  if (!hoja) return;
+
+  const registros =
+    obtenerRegistros(hoja);
+
+  registros.forEach(registro => {
+    const clave =
+      obtenerClaveMes(
+        registro.Fecha
+      );
+
+    if (!clave) return;
+
+    const monto =
+      numeroDesdeValor(
+        registro.Monto
+      );
+
+    const estado =
+      normalizarTexto(
+        registro.Estado
+      );
+
+    if (
+      estado === "pagado" ||
+      estado === "pagada"
+    ) {
+      asegurarMes(clave)
+        .pagos += monto;
+    }
+
+    if (
+      estado === "pendiente" ||
+      estado === "por pagar" ||
+      estado === "pendiente de pago"
+    ) {
+      asegurarMes(clave)
+        .pendientes += monto;
+    }
+  });
+}
+
+function procesarSuper(
+  archivo,
+  asegurarMes
+) {
+  const hoja =
+    archivo.getSheetByName(
+      "Super"
+    );
+
+  if (!hoja) return;
+
+  const registros =
+    obtenerRegistros(hoja);
+
+  registros.forEach(registro => {
+    const clave =
+      obtenerClaveMes(
+        registro.Fecha
+      );
+
+    if (!clave) return;
+
+    const estado =
+      normalizarTexto(
+        registro.Estado
+      );
+
+    if (
+      estado === "comprado" ||
+      estado === "comprada"
+    ) {
+      asegurarMes(clave)
+        .super +=
+          numeroDesdeValor(
+            registro.Costo
+          );
+    }
+  });
+}
+
+function obtenerReporte(mesSolicitado) {
+  const archivo =
+    SpreadsheetApp.openById(
+      SPREADSHEET_ID
+    );
+
+  const hoja =
+    archivo.getSheetByName(
+      "Reporte mensual"
+    );
+
+  if (!hoja) {
     throw new Error(
-      datos?.error?.message ||
-      `Gemini respondió con HTTP ${respuesta.status}`
+      'No existe "Reporte mensual".'
     );
   }
 
-  const texto =
-    datos?.candidates?.[0]
-      ?.content?.parts
-      ?.map(parte => parte.text)
-      .filter(Boolean)
-      .join("\n")
-      .trim();
+  const registros =
+    obtenerRegistros(hoja);
+
+  if (
+    !mesSolicitado ||
+    String(mesSolicitado).trim() === ""
+  ) {
+    return {
+      ok: true,
+      reportes: registros
+    };
+  }
+
+  const buscado =
+    normalizarTexto(
+      mesSolicitado
+    );
+
+  const encontrados =
+    registros.filter(
+      registro =>
+        normalizarTexto(
+          registro.Mes
+        ).includes(buscado)
+    );
+
+  return {
+    ok: true,
+    reportes: encontrados
+  };
+}
+
+function obtenerRegistros(hoja) {
+  const ultimaFila =
+    hoja.getLastRow();
+
+  const encabezados =
+    obtenerEncabezados(hoja);
+
+  if (ultimaFila <= 1) {
+    return [];
+  }
+
+  const valores =
+    hoja.getRange(
+      2,
+      1,
+      ultimaFila - 1,
+      encabezados.length
+    ).getValues();
+
+  return valores.map(fila => {
+    const registro = {};
+
+    encabezados.forEach(
+      (encabezado, indice) => {
+        registro[encabezado] =
+          fila[indice];
+      }
+    );
+
+    return registro;
+  });
+}
+
+function obtenerEncabezados(hoja) {
+  const ultimaColumna =
+    hoja.getLastColumn();
+
+  if (ultimaColumna === 0) {
+    throw new Error(
+      `La hoja "${hoja.getName()}" no tiene encabezados.`
+    );
+  }
+
+  return hoja
+    .getRange(
+      1,
+      1,
+      1,
+      ultimaColumna
+    )
+    .getDisplayValues()[0]
+    .map(
+      valor =>
+        String(valor).trim()
+    );
+}
+
+function prepararValor(
+  encabezado,
+  valor
+) {
+  if (
+    valor === undefined ||
+    valor === null
+  ) {
+    return "";
+  }
+
+  if (
+    encabezado === "Monto" ||
+    encabezado === "Costo"
+  ) {
+    return numeroDesdeValor(valor);
+  }
+
+  if (
+    encabezado === "Cantidad"
+  ) {
+    const numero =
+      numeroDesdeValor(valor);
+
+    return Number.isNaN(numero)
+      ? valor
+      : numero;
+  }
+
+  return valor;
+}
+
+function numeroDesdeValor(valor) {
+  if (
+    typeof valor === "number"
+  ) {
+    return valor;
+  }
+
+  let texto =
+    String(valor || "")
+      .trim()
+      .replace(/\s/g, "")
+      .replace(/MXN/gi, "")
+      .replace(/\$/g, "");
 
   if (!texto) {
-    throw new Error(
-      "Gemini no devolvió texto."
-    );
+    return 0;
   }
 
-  console.log(
-    "JSON Gemini:",
-    texto
-  );
-
-  return extraerJSON(texto);
-}
-
-function combinarDatos(
-  anteriores,
-  nuevos
-) {
-  const resultado = {
-    ...anteriores
-  };
+  texto =
+    texto.replace(
+      /[^0-9,.\-]/g,
+      ""
+    );
 
   if (
-    nuevos &&
-    typeof nuevos === "object"
+    texto.includes(",") &&
+    texto.includes(".")
   ) {
-    for (
-      const [campo, valor]
-      of Object.entries(nuevos)
+    if (
+      texto.lastIndexOf(".") >
+      texto.lastIndexOf(",")
     ) {
-      if (!estaVacio(valor)) {
-        resultado[campo] = valor;
-      }
+      texto =
+        texto.replace(/,/g, "");
+    } else {
+      texto =
+        texto.replace(/\./g, "")
+          .replace(",", ".");
+    }
+  } else if (
+    texto.includes(",")
+  ) {
+    const partes =
+      texto.split(",");
+
+    if (
+      partes.length === 2 &&
+      partes[1].length <= 2
+    ) {
+      texto =
+        partes[0] +
+        "." +
+        partes[1];
+    } else {
+      texto =
+        texto.replace(/,/g, "");
     }
   }
 
-  return resultado;
+  const numero =
+    Number(texto);
+
+  return Number.isFinite(numero)
+    ? numero
+    : 0;
 }
 
-async function guardarEnSheets(
-  sheet,
-  data
-) {
-  if (!APPS_SCRIPT_URL) {
-    throw new Error(
-      "Falta APPS_SCRIPT_URL."
+function obtenerClaveMes(valor) {
+  if (
+    valor instanceof Date &&
+    !isNaN(valor)
+  ) {
+    return Utilities.formatDate(
+      valor,
+      Session.getScriptTimeZone(),
+      "yyyy-MM"
     );
   }
-
-  if (!APPS_SCRIPT_SECRET) {
-    throw new Error(
-      "Falta APPS_SCRIPT_SECRET."
-    );
-  }
-
-  const respuesta = await fetch(
-    APPS_SCRIPT_URL,
-    {
-      method: "POST",
-
-      headers: {
-        "Content-Type":
-          "application/json"
-      },
-
-      body: JSON.stringify({
-        secret:
-          APPS_SCRIPT_SECRET,
-
-        sheet,
-        data
-      }),
-
-      redirect: "follow"
-    }
-  );
 
   const texto =
-    await respuesta.text();
+    String(valor || "").trim();
 
-  console.log(
-    "Respuesta Apps Script:",
-    texto
-  );
+  let coincidencia =
+    texto.match(
+      /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/
+    );
 
-  let datos;
-
-  try {
-    datos =
-      JSON.parse(texto);
-  } catch {
-    throw new Error(
-      "Apps Script no devolvió JSON."
+  if (coincidencia) {
+    return (
+      coincidencia[3] +
+      "-" +
+      String(
+        coincidencia[2]
+      ).padStart(2, "0")
     );
   }
 
-  if (!datos.ok) {
-    throw new Error(
-      datos.error ||
-      "Google Sheets rechazó el registro."
+  coincidencia =
+    texto.match(
+      /^(\d{4})-(\d{1,2})-(\d{1,2})$/
+    );
+
+  if (coincidencia) {
+    return (
+      coincidencia[1] +
+      "-" +
+      String(
+        coincidencia[2]
+      ).padStart(2, "0")
     );
   }
 
-  return datos;
+  return null;
 }
 
-async function procesarMensaje(
-  textoUsuario,
-  remitente
-) {
-  const contextoActual =
-    conversaciones.get(remitente)
-    || null;
+function nombreMes(clave) {
+  const partes =
+    clave.split("-");
 
-  const interpretacion =
-    await interpretarConGemini(
-      textoUsuario,
-      contextoActual
-    );
+  const año =
+    Number(partes[0]);
 
-  if (
-    interpretacion.accion ===
-    "cancelar"
-  ) {
-    conversaciones.delete(
-      remitente
-    );
+  const mes =
+    Number(partes[1]);
 
-    return (
-      interpretacion.respuesta ||
-      "Registro cancelado."
-    );
-  }
-
-  if (contextoActual) {
-    const nuevosDatos =
-      combinarDatos(
-        contextoActual.data,
-        interpretacion.data || {}
-      );
-
-    const sesion = {
-      sheet:
-        contextoActual.sheet,
-
-      data:
-        nuevosDatos
-    };
-
-    const faltante =
-      siguienteCampoFaltante(
-        sesion.sheet,
-        sesion.data
-      );
-
-    if (faltante) {
-      conversaciones.set(
-        remitente,
-        sesion
-      );
-
-      return obtenerPregunta(
-        sesion.sheet,
-        faltante,
-        sesion.data
-      );
-    }
-
-    const resultado =
-      await guardarEnSheets(
-        sesion.sheet,
-        sesion.data
-      );
-
-    conversaciones.delete(
-      remitente
-    );
-
-    if (
-      sesion.sheet === "Super"
-    ) {
-      return (
-        `Listo. Guardé ${sesion.data.Producto} ` +
-        `con ID ${resultado.id}.`
-      );
-    }
-
-    if (
-      sesion.sheet === "Pagos"
-    ) {
-      return (
-        `Listo. Guardé ${sesion.data.Servicio} ` +
-        `con ID ${resultado.id}.`
-      );
-    }
-
-    if (
-      sesion.sheet === "Ingresos"
-    ) {
-      return (
-        `Listo. Guardé ${sesion.data.Concepto} ` +
-        `con ID ${resultado.id}.`
-      );
-    }
-
-    return "Listo. Quedó guardado.";
-  }
-
-  if (
-    interpretacion.accion ===
-    "registrar"
-  ) {
-    const sheet =
-      interpretacion.sheet;
-
-    if (
-      !CAMPOS_REQUERIDOS[sheet]
-    ) {
-      return (
-        "No pude identificar dónde guardar ese registro."
-      );
-    }
-
-    const sesion = {
-      sheet,
-      data:
-        interpretacion.data || {}
-    };
-
-    const faltante =
-      siguienteCampoFaltante(
-        sheet,
-        sesion.data
-      );
-
-    if (faltante) {
-      conversaciones.set(
-        remitente,
-        sesion
-      );
-
-      return obtenerPregunta(
-        sheet,
-        faltante,
-        sesion.data
-      );
-    }
-
-    const resultado =
-      await guardarEnSheets(
-        sheet,
-        sesion.data
-      );
-
-    if (sheet === "Super") {
-      return (
-        `Listo. Guardé ${sesion.data.Producto} ` +
-        `con ID ${resultado.id}.`
-      );
-    }
-
-    if (sheet === "Pagos") {
-      return (
-        `Listo. Guardé ${sesion.data.Servicio} ` +
-        `con ID ${resultado.id}.`
-      );
-    }
-
-    if (sheet === "Ingresos") {
-      return (
-        `Listo. Guardé ${sesion.data.Concepto} ` +
-        `con ID ${resultado.id}.`
-      );
-    }
-  }
+  const nombres = [
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre"
+  ];
 
   return (
-    interpretacion.respuesta ||
-    "¿En qué te ayudo?"
+    `${nombres[mes - 1]} ${año}`
   );
 }
 
-async function suscribirWhatsApp() {
-  try {
-    const respuesta = await fetch(
-      `https://graph.facebook.com/v26.0/${WABA_ID}/subscribed_apps?subscribed_fields=messages`,
-      {
-        method: "POST",
-
-        headers: {
-          Authorization:
-            `Bearer ${WHATSAPP_TOKEN}`,
-
-          "Content-Type":
-            "application/json"
-        }
-      }
+function normalizarTexto(valor) {
+  return String(valor || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(
+      /[\u0300-\u036f]/g,
+      ""
     );
-
-    const datos =
-      await respuesta.json();
-
-    console.log(
-      "Suscripción WhatsApp:",
-      datos
-    );
-
-  } catch (error) {
-    console.error(
-      "Error al suscribir WhatsApp:",
-      error
-    );
-  }
 }
 
-const server =
-  http.createServer(
-    (req, res) => {
+function normalizarComparacion(
+  valor
+) {
+  return String(
+    valor === undefined ||
+    valor === null
+      ? ""
+      : valor
+  ).trim();
+}
 
-      const url = new URL(
-        req.url,
-        `http://${req.headers.host}`
-      );
-
-      if (
-        req.method === "GET" &&
-        url.pathname === "/privacy"
-      ) {
-        res.writeHead(
-          200,
-          {
-            "Content-Type":
-              "text/html; charset=utf-8"
-          }
-        );
-
-        return res.end(`
-          <h1>Política de privacidad</h1>
-          <p>Esta aplicación es de uso personal y procesa únicamente la información necesaria para su funcionamiento.</p>
-          <p>No vendemos ni compartimos datos personales con terceros.</p>
-          <p>Contacto: zurita-17@hotmail.com</p>
-        `);
-      }
-
-      if (
-        req.method === "GET" &&
-        url.pathname === "/webhook"
-      ) {
-        const mode =
-          url.searchParams.get(
-            "hub.mode"
-          );
-
-        const token =
-          url.searchParams.get(
-            "hub.verify_token"
-          );
-
-        const challenge =
-          url.searchParams.get(
-            "hub.challenge"
-          );
-
-        if (
-          mode === "subscribe" &&
-          token === VERIFY_TOKEN
-        ) {
-          res.writeHead(
-            200,
-            {
-              "Content-Type":
-                "text/plain"
-            }
-          );
-
-          return res.end(
-            challenge || ""
-          );
-        }
-
-        res.writeHead(403);
-
-        return res.end(
-          "Forbidden"
-        );
-      }
-
-      if (
-        req.method === "POST" &&
-        url.pathname === "/webhook"
-      ) {
-        let body = "";
-
-        req.on(
-          "data",
-          chunk => {
-            body += chunk;
-          }
-        );
-
-        req.on(
-          "end",
-          async () => {
-
-            let payload;
-
-            try {
-              payload =
-                JSON.parse(body);
-
-              console.log(
-                "Webhook recibido:",
-                JSON.stringify(
-                  payload,
-                  null,
-                  2
-                )
-              );
-
-            } catch (error) {
-              res.writeHead(
-                200,
-                {
-                  "Content-Type":
-                    "text/plain"
-                }
-              );
-
-              return res.end(
-                "EVENT_RECEIVED"
-              );
-            }
-
-            res.writeHead(
-              200,
-              {
-                "Content-Type":
-                  "text/plain"
-              }
-            );
-
-            res.end(
-              "EVENT_RECEIVED"
-            );
-
-            try {
-              const value =
-                payload?.entry?.[0]
-                  ?.changes?.[0]
-                  ?.value;
-
-              const mensaje =
-                value?.messages?.[0];
-
-              if (!mensaje) {
-                return;
-              }
-
-              if (
-                mensaje.id &&
-                mensajesProcesados.has(
-                  mensaje.id
-                )
-              ) {
-                return;
-              }
-
-              if (mensaje.id) {
-                mensajesProcesados.add(
-                  mensaje.id
-                );
-
-                if (
-                  mensajesProcesados.size >
-                  500
-                ) {
-                  mensajesProcesados.clear();
-                }
-              }
-
-              const remitente =
-                mensaje.from?.startsWith(
-                  "521"
-                )
-                  ? `52${mensaje.from.slice(3)}`
-                  : mensaje.from;
-
-              if (
-                mensaje.type !== "text" ||
-                !mensaje.text?.body ||
-                !remitente
-              ) {
-                return;
-              }
-
-              const textoRecibido =
-                mensaje.text.body.trim();
-
-              console.log(
-                "Mensaje recibido:",
-                textoRecibido
-              );
-
-              try {
-                const respuestaIA =
-                  await procesarMensaje(
-                    textoRecibido,
-                    remitente
-                  );
-
-                await enviarMensajeWhatsApp(
-                  remitente,
-                  respuestaIA
-                );
-
-              } catch (error) {
-                console.error(
-                  "Error procesando IA/Sheets:",
-                  error
-                );
-
-                await enviarMensajeWhatsApp(
-                  remitente,
-                  "Recibí tu mensaje, pero hubo un problema al procesarlo. Revisa los logs de Finanzas IA."
-                );
-              }
-
-            } catch (error) {
-              console.error(
-                "Error procesando mensaje:",
-                error
-              );
-            }
-          }
-        );
-
-        return;
-      }
-
-      if (
-        req.method === "GET" &&
-        url.pathname === "/"
-      ) {
-        res.writeHead(
-          200,
-          {
-            "Content-Type":
-              "text/plain; charset=utf-8"
-          }
-        );
-
-        return res.end(
-          "Finanzas IA activo"
-        );
-      }
-
-      res.writeHead(404);
-      res.end("Not found");
-    }
-  );
-
-server.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-
-    console.log(
-      `Servidor activo en puerto ${PORT}`
+function respuestaJSON(objeto) {
+  return ContentService
+    .createTextOutput(
+      JSON.stringify(objeto)
+    )
+    .setMimeType(
+      ContentService.MimeType.JSON
     );
-
-    if (!WHATSAPP_TOKEN) {
-      console.error(
-        "Falta WHATSAPP_TOKEN."
-      );
-    } else {
-      suscribirWhatsApp();
-    }
-
-    if (!GEMINI_API_KEY) {
-      console.error(
-        "Falta GEMINI_API_KEY."
-      );
-    } else {
-      console.log(
-        "GEMINI_API_KEY detectada."
-      );
-    }
-
-    if (!APPS_SCRIPT_URL) {
-      console.error(
-        "Falta APPS_SCRIPT_URL."
-      );
-    }
-
-    if (!APPS_SCRIPT_SECRET) {
-      console.error(
-        "Falta APPS_SCRIPT_SECRET."
-      );
-    }
-  }
-);
+}
