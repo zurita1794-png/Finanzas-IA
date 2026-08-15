@@ -5,7 +5,15 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "finanzas-ia-token";
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-
+if (req.method === "GET" && url.pathname === "/privacy") {
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  return res.end(`
+    <h1>Política de privacidad</h1>
+    <p>Esta aplicación es de uso personal y procesa únicamente la información necesaria para su funcionamiento.</p>
+    <p>No vendemos ni compartimos datos personales con terceros.</p>
+    <p>Contacto: zurita-17@hotmail.com</p>
+  `);
+}
   if (req.method === "GET" && url.pathname === "/webhook") {
     const mode = url.searchParams.get("hub.mode");
     const token = url.searchParams.get("hub.verify_token");
