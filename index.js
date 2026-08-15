@@ -177,7 +177,9 @@ const server = http.createServer((req, res) => {
           return;
         }
 
-        const remitente = mensaje.from;
+        const remitente = mensaje.from?.startsWith("521")
+  ? `52${mensaje.from.slice(3)}`
+  : mensaje.from;
 
         if (
           mensaje.type === "text" &&
