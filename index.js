@@ -67,7 +67,11 @@ const CAMPOS_REQUERIDOS = {
     "Producto base",
     "Categoría",
     "Monto",
-    "Tienda"
+    "Tienda",
+    "Cantidad",
+    "Unidad",
+    "Contenido por empaque",
+    "Unidad de comparación"
   ]
 };
 
@@ -382,77 +386,166 @@ function obtenerPregunta(
   campo,
   data
 ) {
-  const preguntas = {
-    "Fecha de ingreso":
-      '¿Qué fecha le pongo al ingreso? Puedes decir "hoy", "ayer" o una fecha.',
+  if (campo === "Fecha de ingreso") {
+    return (
+      '¿Qué fecha le pongo al ingreso?\n' +
+      'Ejemplos: "hoy", "ayer" o "16/08/2026".'
+    );
+  }
 
-    "Tipo de ingreso":
-      "¿Qué tipo de ingreso es? Por ejemplo: sueldo, vales, bono o premio.",
+  if (campo === "Tipo de ingreso") {
+    return (
+      "¿Qué tipo de ingreso es?\n" +
+      "Ejemplos: sueldo, bono, vales, comisión, premio de puntualidad o ingreso extraordinario."
+    );
+  }
 
-    "Monto":
-      sheet ===
-      "Ingresos"
-        ? `¿De cuánto fue el ingreso${
-            data[
-              "Tipo de ingreso"
-            ]
-              ? ` de ${
-                  data[
-                    "Tipo de ingreso"
-                  ]
-                }`
-              : ""
-          }?`
+  if (
+    sheet === "Ingresos" &&
+    campo === "Monto"
+  ) {
+    return (
+      `¿De cuánto fue el ingreso${
+        data["Tipo de ingreso"]
+          ? ` de ${data["Tipo de ingreso"]}`
+          : ""
+      }?\n` +
+      'Ejemplo: "18,000 pesos".'
+    );
+  }
 
-        : sheet ===
-          "Pagos"
-          ? `¿Cuál es el monto${
-              data.Concepto
-                ? ` de ${data.Concepto}`
-                : ""
-            }?`
+  if (campo === "Fecha de pago") {
+    return (
+      '¿Qué fecha le pongo al pago?\n' +
+      'Ejemplos: "hoy", "ayer" o "16/08/2026".'
+    );
+  }
 
-          : `¿Cuánto costó${
-              data.Producto
-                ? ` ${data.Producto}`
-                : " la compra"
-            }?`,
+  if (campo === "Concepto") {
+    return (
+      "¿Qué pago es?\n" +
+      "Ejemplos: luz, internet, renta, teléfono, tarjeta o seguro."
+    );
+  }
 
-    "Fecha de pago":
-      '¿Qué fecha le pongo al pago? Puedes decir "hoy", "el siguiente viernes" o una fecha.',
+  if (campo === "Periodo") {
+    return (
+      "¿A qué periodo corresponde ese pago?\n" +
+      'Ejemplos: "Agosto 2026" o "Julio 2026".'
+    );
+  }
 
-    "Concepto":
-      "¿Qué pago es? Por ejemplo: luz, internet, renta o teléfono.",
+  if (
+    sheet === "Pagos" &&
+    campo === "Monto"
+  ) {
+    return (
+      `¿Cuál es el monto${
+        data.Concepto
+          ? ` de ${data.Concepto}`
+          : ""
+      }?\n` +
+      'Ejemplo: "850 pesos".'
+    );
+  }
 
-    "Periodo":
-      "¿Este pago corresponde a qué mes? Por ejemplo: Agosto 2026.",
+  if (
+    sheet === "Pagos" &&
+    campo === "Estado"
+  ) {
+    return (
+      "¿Cuál es el estado del pago?\n" +
+      'Ejemplos: "Pagado" si ya salió el dinero o "Pendiente" si todavía falta pagarlo.'
+    );
+  }
 
-    "Estado":
-      "¿Este pago ya se hizo o está pendiente?",
+  if (campo === "Fecha de compra") {
+    return (
+      '¿Qué fecha le pongo a la compra?\n' +
+      'Ejemplos: "hoy", "ayer" o "16/08/2026".'
+    );
+  }
 
-    "Fecha de compra":
-      '¿Qué fecha le pongo a la compra? Puedes decir "hoy", "ayer" o una fecha.',
+  if (campo === "Producto") {
+    return (
+      "¿Cuál es el producto específico?\n" +
+      "Pon la marca o nombre concreto.\n" +
+      "Ejemplos: Coca-Cola Zero, Galletas Marías Gamesa o Papel Higiénico Regio."
+    );
+  }
 
-    "Producto":
-      "¿Qué producto compraste?",
+  if (campo === "Producto base") {
+    return (
+      "¿Cuál es el producto base?\n" +
+      "Es el tipo general, sin marca ni presentación, para comparar precios después.\n" +
+      "Ejemplos: refresco, galletas, papel higiénico, leche o agua mineral."
+    );
+  }
 
-    "Producto base":
-      `¿Cómo quieres identificar el producto para compararlo después? Por ejemplo, "${
-        data.Producto ||
-        "papel higiénico"
-      }" sin marca ni presentación.`,
+  if (campo === "Categoría") {
+    return (
+      "¿En qué categoría va?\n" +
+      "Es el grupo general del gasto.\n" +
+      "Ejemplos: bebidas, higiene, limpieza, despensa, lácteos o farmacia."
+    );
+  }
 
-    "Categoría":
-      "¿En qué categoría va? Por ejemplo: limpieza, higiene, alimentos o hogar.",
+  if (
+    sheet === "Super" &&
+    campo === "Monto"
+  ) {
+    return (
+      `¿Cuánto pagaste en total por ${
+        data.Producto || "ese producto"
+      }?\n` +
+      'Ejemplo: "120 pesos".'
+    );
+  }
 
-    "Tienda":
-      "¿En qué tienda lo compraste?"
-  };
+  if (campo === "Tienda") {
+    return (
+      "¿En qué tienda lo compraste?\n" +
+      "Ejemplos: Walmart, Costco, Soriana, Chedraui o Farmacia Guadalajara."
+    );
+  }
 
-  return (
-    preguntas[campo] ||
-    `¿Cuál es el valor de ${campo}?`
-  );
+  if (campo === "Cantidad") {
+    return (
+      "¿Cuántos empaques o productos completos compraste?\n" +
+      "No cuentes aquí las piezas que vienen dentro del empaque.\n" +
+      "Ejemplos: 1 paquete, 2 cajas o 3 botellas.\n" +
+      'Si compraste un paquete de 12 rollos, responde "1".'
+    );
+  }
+
+  if (campo === "Unidad") {
+    return (
+      "¿Cuál es el tipo de empaque o unidad que compraste?\n" +
+      "Ejemplos: paquete, caja, bolsa, botella, lata o pieza."
+    );
+  }
+
+  if (campo === "Contenido por empaque") {
+    return (
+      "¿Cuánto contenido trae cada empaque?\n" +
+      "Ejemplos:\n" +
+      "• Paquete de 12 rollos → 12\n" +
+      "• Caja de 24 latas → 24\n" +
+      "• Paquete con 6 litros → 6\n" +
+      "• Bolsa de 750 g comparada por kilogramo → 0.75"
+    );
+  }
+
+  if (campo === "Unidad de comparación") {
+    return (
+      "¿Con qué unidad quieres comparar el precio?\n" +
+      "Usa una unidad práctica.\n" +
+      "Ejemplos: rollo, litro, kilogramo, pieza o lata.\n" +
+      "Papel higiénico → rollo; leche → litro; arroz → kilogramo."
+    );
+  }
+
+  return `¿Cuál es el valor de ${campo}?`;
 }
 
 function esSaludoSimple(
@@ -672,7 +765,7 @@ function camposParaResumen(
     ];
   }
 
-  return [
+    return [
     "Fecha de compra",
     "Producto",
     "Producto base",
@@ -681,6 +774,8 @@ function camposParaResumen(
     "Tienda",
     "Cantidad",
     "Unidad",
+    "Contenido por empaque",
+    "Unidad de comparación",
     "Precio por unidad",
     "Notas"
   ];
@@ -1034,11 +1129,25 @@ Monto,
 Tienda,
 Cantidad,
 Unidad,
+Contenido por empaque,
+Unidad de comparación,
 Precio por unidad,
 Notas,
 Registro de mensaje enviado
 
-ACCIONES POSIBLES:
+REGLAS ESPECÍFICAS PARA SUPER:
+- Producto es el artículo específico, incluyendo marca o presentación cuando se conozca. Ejemplos: "Coca-Cola Zero 600 ml", "Papel Higiénico Regio 12 rollos".
+- Producto base es el artículo general que sirve para comparar. Ejemplos: "Refresco", "Papel higiénico", "Leche".
+- Categoría es el grupo general del gasto. Ejemplos: "Bebidas", "Higiene", "Lácteos", "Despensa".
+- Cantidad es el número de empaques o productos completos comprados. Ejemplo: si compró 1 paquete de 12 rollos, Cantidad = 1.
+- Unidad es el tipo de empaque comprado. Ejemplos: paquete, caja, bolsa, botella, lata, pieza.
+- Contenido por empaque indica cuánto trae CADA empaque expresado en la Unidad de comparación.
+- Ejemplo: paquete de 12 rollos => Contenido por empaque = 12 y Unidad de comparación = "rollo".
+- Ejemplo: botella de 600 ml => Contenido por empaque = 0.6 y Unidad de comparación = "litro".
+- Ejemplo: bolsa de 750 g => Contenido por empaque = 0.75 y Unidad de comparación = "kilogramo".
+- Unidad de comparación debe ser una unidad práctica para comparar precios: rollo, litro, kilogramo, pieza, lata, etc.
+- No inventes Cantidad, Unidad, Contenido por empaque ni Unidad de comparación si el usuario no los dijo o no pueden inferirse con seguridad.
+- Precio por unidad puede quedar vacío; el sistema lo calculará automáticamente.
 
 1) REGISTRAR
 
@@ -1277,20 +1386,29 @@ Si es un ticket de supermercado, devuelve:
       "Monto": 0,
       "Cantidad": "",
       "Unidad": "",
+      "Contenido por empaque": "",
+      "Unidad de comparación": "",
       "Precio por unidad": ""
     }
   ]
 }
 
 Reglas para ticket_super:
-
-- Extrae solo lo que realmente se vea.
-- No inventes productos o precios.
-- Producto conserva marca/presentación si se ve.
-- Producto base elimina marca/presentación y sirve para comparar precios.
-- Categoría puede inferirse si es obvia.
-- Si no se ve cantidad o unidad, déjalas vacías.
-- Si Monto es el total de una línea y Cantidad es numérica, puedes calcular Precio por unidad.
+- Extrae solo información que realmente se vea o que pueda inferirse con seguridad.
+- No inventes productos, precios, cantidades, contenido ni presentaciones.
+- Producto conserva marca y presentación cuando puedan identificarse. Ejemplo: "Coca-Cola Zero 600 ml".
+- Producto base es el producto general sin marca ni presentación. Ejemplo: "Refresco".
+- Categoría es el grupo general. Ejemplo: "Bebidas".
+- Cantidad es cuántos empaques o productos completos se compraron.
+- Ejemplo: 1 paquete de 12 rollos => Cantidad = 1.
+- Unidad es el tipo de empaque comprado: paquete, caja, bolsa, botella, lata, pieza, etc.
+- Contenido por empaque es cuánto trae CADA empaque expresado en la Unidad de comparación.
+- Ejemplo: paquete de 12 rollos => Contenido por empaque = 12 y Unidad de comparación = "rollo".
+- Ejemplo: botella de 600 ml => Contenido por empaque = 0.6 y Unidad de comparación = "litro".
+- Ejemplo: bolsa de 750 g => Contenido por empaque = 0.75 y Unidad de comparación = "kilogramo".
+- Usa unidades prácticas para comparar precios; evita unidades diminutas como mililitro cuando sea más útil comparar por litro.
+- Si la presentación no puede determinarse con seguridad, deja Cantidad, Unidad, Contenido por empaque o Unidad de comparación vacíos según corresponda.
+- Deja Precio por unidad vacío. El sistema lo calculará automáticamente usando Monto, Cantidad y Contenido por empaque.
 - Fecha debe ser DD/MM/AAAA.
 - Si no se ve la fecha, déjala vacía.
 - Si no se ve la tienda, déjala vacía.
@@ -2173,14 +2291,22 @@ function completarDatosCalculados(
         resultado.Cantidad
       );
 
-    if (
-      estaVacio(
+    const contenido =
+      valorNumero(
         resultado[
-          "Precio por unidad"
+          "Contenido por empaque"
         ]
-      ) &&
+      );
+
+    const unidadesComparables =
+      cantidad *
+      contenido;
+
+    if (
       monto > 0 &&
-      cantidad > 0
+      cantidad > 0 &&
+      contenido > 0 &&
+      unidadesComparables > 0
     ) {
       resultado[
         "Precio por unidad"
@@ -2188,7 +2314,7 @@ function completarDatosCalculados(
         Math.round(
           (
             monto /
-            cantidad
+            unidadesComparables
           ) *
           100
         ) /
@@ -3668,6 +3794,18 @@ function limpiarItemTicket(
       item.Unidad ||
       "",
 
+    "Contenido por empaque":
+      item[
+        "Contenido por empaque"
+      ] ??
+      "",
+
+    "Unidad de comparación":
+      item[
+        "Unidad de comparación"
+      ] ||
+      "",
+
     "Precio por unidad":
       item[
         "Precio por unidad"
@@ -3677,52 +3815,6 @@ function limpiarItemTicket(
     Notas:
       "",
 
-    "Registro de mensaje enviado":
-      "Foto de ticket recibida por WhatsApp"
-  };
-
-  return completarDatosCalculados(
-    "Super",
-    data,
-    "Foto de ticket recibida por WhatsApp"
-  );
-}
-
-function resumenTicketSuper(
-  registros
-) {
-  return registros
-    .map(
-      (
-        r,
-        i
-      ) => {
-        let linea =
-          `${i + 1}. ${r.Producto}`;
-
-        if (
-          !estaVacio(
-            r.Monto
-          )
-        ) {
-          linea +=
-            ` — ${formatearDinero(
-              r.Monto
-            )}`;
-        }
-
-        if (
-          r.Tienda
-        ) {
-          linea +=
-            ` — ${r.Tienda}`;
-        }
-
-        return linea;
-      }
-    )
-    .join("\n");
-}
 
 async function procesarImagenRecibida(
   mensaje,
@@ -3913,10 +4005,12 @@ function resumenTicketSuper(registros) {
         `Producto: ${valorTicket(r.Producto)}`,
         `Producto base: ${valorTicket(r["Producto base"])}`,
         `Categoría: ${valorTicket(r.Categoría)}`,
-        `Monto: ${valorTicket(r.Monto, "dinero")}`,
-        `Cantidad: ${valorTicket(r.Cantidad)}`,
-        `Unidad: ${valorTicket(r.Unidad)}`,
-        `Precio por unidad: ${
+        `Monto total: ${valorTicket(r.Monto, "dinero")}`,
+        `Cantidad comprada: ${valorTicket(r.Cantidad)}`,
+        `Unidad de compra: ${valorTicket(r.Unidad)}`,
+        `Contenido por empaque: ${valorTicket(r["Contenido por empaque"])}`,
+        `Unidad de comparación: ${valorTicket(r["Unidad de comparación"])}`,
+        `Precio por unidad de comparación: ${
           estaVacio(r["Precio por unidad"])
             ? "—"
             : formatearDinero(r["Precio por unidad"])
@@ -3937,6 +4031,8 @@ const CAMPOS_CORRECCION_TICKET = [
   "Tienda",
   "Cantidad",
   "Unidad",
+  "Contenido por empaque",
+  "Unidad de comparación",
   "Precio por unidad"
 ];
 
@@ -3958,11 +4054,14 @@ function menuCorreccionTicket() {
     "6. Tienda",
     "7. Cantidad",
     "8. Unidad",
-    "9. Precio por unidad",
+    "9. Contenido por empaque",
+    "10. Unidad de comparación",
+    "11. Precio por unidad",
     "",
     "Puedes responder, por ejemplo:",
     '• "2 y 4"',
     '• "producto y categoría"',
+    '• "contenido por empaque y unidad de comparación"',
     '• "solo precio y tienda están bien"',
     '• "cancelar"'
   ].join("\n");
@@ -3971,7 +4070,10 @@ function menuCorreccionTicket() {
 function detectarCamposTicket(texto) {
   const t = normalizar(texto);
 
-  if (t.includes("cancelar") || t.includes("cancela")) {
+  if (
+    t.includes("cancelar") ||
+    t.includes("cancela")
+  ) {
     return {
       accion: "cancelar",
       campos: []
@@ -3987,6 +4089,135 @@ function detectarCamposTicket(texto) {
       campos: []
     };
   }
+
+  const campos = new Set();
+
+  const numeroACampo = {
+    1: "Fecha de compra",
+    2: "Producto",
+    3: "Producto base",
+    4: "Categoría",
+    5: "Monto",
+    6: "Tienda",
+    7: "Cantidad",
+    8: "Unidad",
+    9: "Contenido por empaque",
+    10: "Unidad de comparación",
+    11: "Precio por unidad"
+  };
+
+  const numeros =
+    t.match(/\b(?:10|11|[1-9])\b/g) || [];
+
+  numeros.forEach(n => {
+    const campo =
+      numeroACampo[Number(n)];
+
+    if (campo) {
+      campos.add(campo);
+    }
+  });
+
+  if (t.includes("fecha")) {
+    campos.add("Fecha de compra");
+  }
+
+  if (
+    t.includes("producto base") ||
+    t.includes("nombre base")
+  ) {
+    campos.add("Producto base");
+  }
+
+  const sinProductoBase = t
+    .replace(/producto base/g, "")
+    .replace(/nombre base/g, "");
+
+  if (
+    sinProductoBase.includes("producto")
+  ) {
+    campos.add("Producto");
+  }
+
+  if (t.includes("categoria")) {
+    campos.add("Categoría");
+  }
+
+  if (t.includes("tienda")) {
+    campos.add("Tienda");
+  }
+
+  if (t.includes("cantidad")) {
+    campos.add("Cantidad");
+  }
+
+  const mencionaContenidoEmpaque =
+    t.includes("contenido por empaque") ||
+    t.includes("contenido del empaque") ||
+    t.includes("contenido empaque");
+
+  if (mencionaContenidoEmpaque) {
+    campos.add(
+      "Contenido por empaque"
+    );
+  }
+
+  const mencionaUnidadComparacion =
+    t.includes("unidad de comparacion") ||
+    t.includes("unidad comparacion");
+
+  if (mencionaUnidadComparacion) {
+    campos.add(
+      "Unidad de comparación"
+    );
+  }
+
+  const mencionaPrecioUnidad =
+    t.includes("precio por unidad") ||
+    t.includes("precio unitario") ||
+    t.includes("unitario");
+
+  if (mencionaPrecioUnidad) {
+    campos.add(
+      "Precio por unidad"
+    );
+  }
+
+  if (
+    t.includes("monto") ||
+    t.includes("precio total") ||
+    (
+      t.includes("precio") &&
+      !mencionaPrecioUnidad
+    )
+  ) {
+    campos.add("Monto");
+  }
+
+  if (
+    t.includes("unidad") &&
+    !mencionaPrecioUnidad &&
+    !mencionaUnidadComparacion
+  ) {
+    campos.add("Unidad");
+  }
+
+  const hablaDeCorrectos =
+    t.includes("estan bien") ||
+    t.includes("esta bien") ||
+    t.includes("correctos") ||
+    t.includes("correcto");
+
+  return {
+    accion:
+      hablaDeCorrectos
+        ? "correctos"
+        : "corregir",
+
+    campos:
+      [...campos].filter(Boolean)
+  };
+}
 
   const campos = new Set();
 
@@ -4101,7 +4332,10 @@ function preguntaCorreccionCampo(
   registros
 ) {
   if (campo === "Fecha de compra") {
-    return '¿Cuál es la fecha correcta? Puedes decir "hoy" o escribirla como 16/08/2026.';
+    return (
+      "¿Cuál es la fecha correcta de la compra?\n" +
+      'Ejemplos: "hoy", "ayer" o "16/08/2026".'
+    );
   }
 
   if (campo === "Tienda") {
@@ -4111,7 +4345,8 @@ function preguntaCorreccionCampo(
           registros[0]?.Tienda
         )
       }\n` +
-      "¿Cuál es la tienda correcta?"
+      "¿Cuál es la tienda correcta?\n" +
+      "Ejemplos: Walmart, Costco, Soriana, Chedraui o Farmacia Guadalajara."
     );
   }
 
@@ -4131,28 +4366,102 @@ function preguntaCorreccionCampo(
       )
       .join("\n");
 
+  let explicacion = "";
+
+  if (campo === "Producto") {
+    explicacion =
+      "Producto es el artículo específico, con marca o presentación.\n" +
+      "Ejemplos: Coca-Cola Zero 600 ml, Galletas Marías Gamesa, Papel Higiénico Regio 12 rollos.";
+  }
+
+  if (campo === "Producto base") {
+    explicacion =
+      "Producto base es el artículo general, sin marca ni presentación, para comparar compras después.\n" +
+      "Ejemplos: refresco, galletas, papel higiénico, leche, agua mineral.";
+  }
+
+  if (campo === "Categoría") {
+    explicacion =
+      "Categoría es el grupo general del gasto.\n" +
+      "Ejemplos: bebidas, higiene, limpieza, despensa, lácteos, farmacia.";
+  }
+
+  if (campo === "Monto") {
+    explicacion =
+      "Monto es el total pagado por ese producto o renglón del ticket.\n" +
+      'Ejemplo: "120 pesos".';
+  }
+
+  if (campo === "Cantidad") {
+    explicacion =
+      "Cantidad es cuántos empaques o productos completos compraste.\n" +
+      "No cuentes aquí las piezas que vienen dentro del empaque.\n" +
+      'Ejemplo: 1 paquete de 12 rollos → responde "1".';
+  }
+
+  if (campo === "Unidad") {
+    explicacion =
+      "Unidad es el tipo de empaque o presentación que compraste.\n" +
+      "Ejemplos: paquete, caja, bolsa, botella, lata, pieza.";
+  }
+
+  if (campo === "Contenido por empaque") {
+    explicacion =
+      "Contenido por empaque indica cuánto trae CADA empaque, expresado en la unidad que usarás para comparar.\n" +
+      "Ejemplos:\n" +
+      "• Paquete de 12 rollos → 12\n" +
+      "• Caja de 24 latas → 24\n" +
+      "• Botella de 600 ml comparada por litro → 0.6\n" +
+      "• Bolsa de 750 g comparada por kilogramo → 0.75";
+  }
+
+  if (campo === "Unidad de comparación") {
+    explicacion =
+      "Unidad de comparación es la medida práctica con la que quieres comparar precios.\n" +
+      "Ejemplos: rollo, litro, kilogramo, pieza o lata.\n" +
+      "Papel higiénico → rollo; leche → litro; arroz → kilogramo.";
+  }
+
+  if (campo === "Precio por unidad") {
+    explicacion =
+      "Precio por unidad es el costo por la unidad de comparación.\n" +
+      "Normalmente el sistema lo calcula automáticamente.\n" +
+      "Ejemplo: 1 paquete de 12 rollos por $120 → $10 por rollo.";
+  }
+
   if (registros.length === 1) {
-    return (
-      `${etiquetaCampoTicket(campo)} actual: ` +
-      `${valorTicket(
-        registros[0]?.[campo],
-        campo === "Monto" ||
-        campo === "Precio por unidad"
-          ? "dinero"
-          : "texto"
-      )}\n` +
+    return [
+      `${etiquetaCampoTicket(campo)} actual: ${
+        valorTicket(
+          registros[0]?.[campo],
+          campo === "Monto" ||
+          campo === "Precio por unidad"
+            ? "dinero"
+            : "texto"
+        )
+      }`,
+      "",
+      explicacion,
+      "",
       "¿Cuál debe ser?"
-    );
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   return [
     `Vamos a corregir: ${etiquetaCampoTicket(campo)}`,
     "",
+    explicacion,
+    "",
+    "Valores actuales:",
     actuales,
     "",
     "Escribe los valores correctos, uno por línea y en el mismo orden.",
-    'Si alguno debe quedarse igual, escribe "igual" en esa línea.'
-  ].join("\n");
+    'Si alguno debe quedarse igual, escribe "igual".'
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function extraerListaCorreccion(
@@ -4422,6 +4731,7 @@ async function aplicarCorreccionTicket(
     [
       "Monto",
       "Cantidad",
+      "Contenido por empaque",
       "Precio por unidad"
     ].includes(
       campo
@@ -4474,32 +4784,54 @@ async function aplicarCorreccionTicket(
       }
 
       if (
-        (
-          campo === "Monto" ||
-          campo === "Cantidad"
-        ) &&
-        valorNumero(
-          r.Monto
-        ) > 0 &&
-        valorNumero(
-          r.Cantidad
-        ) > 0
+        [
+          "Monto",
+          "Cantidad",
+          "Contenido por empaque"
+        ].includes(campo)
       ) {
-        r[
-          "Precio por unidad"
-        ] =
-          Math.round(
-            (
-              valorNumero(
-                r.Monto
-              ) /
-              valorNumero(
-                r.Cantidad
-              )
-            ) *
-            100
-          ) /
-          100;
+        const monto =
+          valorNumero(
+            r.Monto
+          );
+
+        const cantidad =
+          valorNumero(
+            r.Cantidad
+          );
+
+        const contenido =
+          valorNumero(
+            r[
+              "Contenido por empaque"
+            ]
+          );
+
+        if (
+          monto > 0 &&
+          cantidad > 0 &&
+          contenido > 0
+        ) {
+          r[
+            "Precio por unidad"
+          ] =
+            Math.round(
+              (
+                monto /
+                (
+                  cantidad *
+                  contenido
+                )
+              ) *
+              100
+            ) /
+            100;
+
+        } else {
+          r[
+            "Precio por unidad"
+          ] = "";
+        }
       }
     }
   );
@@ -4638,7 +4970,26 @@ async function procesarImagenRecibida(
         "¿En qué tienda fue?"
       );
     }
+const camposFaltantes =
+  CAMPOS_REQUERIDOS.Super.filter(
+    campo =>
+      registros.some(
+        r =>
+          estaVacio(
+            r[campo]
+          )
+      )
+  );
 
+if (
+  camposFaltantes.length
+) {
+  return siguienteCorreccionTicket(
+    remitente,
+    registros,
+    camposFaltantes
+  );
+}
     guardarSesion(
       remitente,
       {
@@ -4740,7 +5091,24 @@ async function procesarTicketPendiente(
         "Perfecto. ¿En qué tienda fue la compra?"
       );
     }
+const camposFaltantes =
+  CAMPOS_REQUERIDOS.Super.filter(
+    campo =>
+      registros.some(
+        r =>
+          estaVacio(
+            r[campo]
+          )
+      )
+  );
 
+if (camposFaltantes.length) {
+  return siguienteCorreccionTicket(
+    remitente,
+    registros,
+    camposFaltantes
+  );
+}
     guardarSesion(
       remitente,
       {
@@ -4785,7 +5153,24 @@ async function procesarTicketPendiente(
             tienda
         })
       );
+const camposFaltantes =
+  CAMPOS_REQUERIDOS.Super.filter(
+    campo =>
+      registros.some(
+        r =>
+          estaVacio(
+            r[campo]
+          )
+      )
+  );
 
+if (camposFaltantes.length) {
+  return siguienteCorreccionTicket(
+    remitente,
+    registros,
+    camposFaltantes
+  );
+}
     guardarSesion(
       remitente,
       {
