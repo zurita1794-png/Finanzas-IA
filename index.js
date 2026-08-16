@@ -1,66 +1,24 @@
 const http = require("http");
 
 const PORT = process.env.PORT || 10000;
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "finanzas-ia-token";
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
+const APPS_SCRIPT_SECRET = process.env.APPS_SCRIPT_SECRET;
+const GRAPH_VERSION = process.env.GRAPH_VERSION || "v26.0";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+const WABA_ID = process.env.WABA_ID || "1363654319277230";
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID || "1327077313815752";
+const ZONA_HORARIA = "America/Mexico_City";
+const SESION_MS = 2 * 60 * 60 * 1000;
 
-const VERIFY_TOKEN =
-  process.env.VERIFY_TOKEN ||
-  "finanzas-ia-token";
-
-const WHATSAPP_TOKEN =
-  process.env.WHATSAPP_TOKEN;
-
-const GEMINI_API_KEY =
-  process.env.GEMINI_API_KEY;
-
-const APPS_SCRIPT_URL =
-  process.env.APPS_SCRIPT_URL;
-
-const APPS_SCRIPT_SECRET =
-  process.env.APPS_SCRIPT_SECRET;
-
-const GRAPH_VERSION =
-  process.env.GRAPH_VERSION ||
-  "v26.0";
-
-const GEMINI_MODEL =
-  process.env.GEMINI_MODEL ||
-  "gemini-3.1-flash-lite";
-
-const WABA_ID =
-  process.env.WABA_ID ||
-  "1363654319277230";
-
-const PHONE_NUMBER_ID =
-  process.env.PHONE_NUMBER_ID ||
-  "1327077313815752";
-
-const ZONA_HORARIA =
-  "America/Mexico_City";
-
-const SESION_MS =
-  2 * 60 * 60 * 1000;
-
-const mensajesProcesados =
-  new Map();
-
-const sesiones =
-  new Map();
+const mensajesProcesados = new Map();
+const sesiones = new Map();
 
 const CAMPOS_REQUERIDOS = {
-  Ingresos: [
-    "Fecha de ingreso",
-    "Tipo de ingreso",
-    "Monto"
-  ],
-
-  Pagos: [
-    "Fecha de pago",
-    "Concepto",
-    "Periodo",
-    "Monto",
-    "Estado"
-  ],
-
+  Ingresos: ["Fecha de ingreso", "Tipo de ingreso", "Monto"],
+  Pagos: ["Fecha de pago", "Concepto", "Periodo", "Monto", "Estado"],
   Super: [
     "Fecha de compra",
     "Producto",
@@ -75,12 +33,24 @@ const CAMPOS_REQUERIDOS = {
   ]
 };
 
+const CAMPOS_CORRECCION_TICKET = [
+  "Fecha de compra",
+  "Producto",
+  "Producto base",
+  "Categoría",
+  "Monto",
+  "Tienda",
+  "Cantidad",
+  "Unidad",
+  "Contenido por empaque",
+  "Unidad de comparación",
+  "Precio por unidad"
+];
+
+const SEPARADOR = "──────────";
+
 function estaVacio(valor) {
-  return (
-    valor === undefined ||
-    valor === null ||
-    String(valor).trim() === ""
-  );
+  return valor === undefined || valor === null || String(valor).trim() === "";
 }
 
 function normalizar(valor) {
@@ -88,48 +58,19 @@ function normalizar(valor) {
     .trim()
     .toLowerCase()
     .normalize("NFD")
-    .replace(
-      /[\u0300-\u036f]/g,
-      ""
-    );
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
-function guardarSesion(
-  remitente,
-  sesion
-) {
-  sesiones.set(
-    remitente,
-    {
-      ...sesion,
-      actualizadoEn:
-        Date.now()
-    }
-  );
+function guardarSesion(remitente, sesion) {
+  sesiones.set(remitente, { ...sesion, actualizadoEn: Date.now() });
 }
 
-function obtenerSesion(
-  remitente
-) {
-  const sesion =
-    sesiones.get(remitente);
+function obtenerSesion(remitente) {
+  const sesion = sesiones.get(remitente);
+  if (!sesion) return null;
 
-  if (!sesion) {
-    return null;
-  }
-
-  if (
-    Date.now() -
-      Number(
-        sesion.actualizadoEn ||
-        0
-      ) >
-    SESION_MS
-  ) {
-    sesiones.delete(
-      remitente
-    );
-
+  if (Date.now() - Number(sesion.actualizadoEn || 0) > SESION_MS) {
+    sesiones.delete(remitente);
     return null;
   }
 
@@ -137,441 +78,215 @@ function obtenerSesion(
 }
 
 function limpiarMensajesProcesados() {
-  const limite =
-    Date.now() -
-    6 * 60 * 60 * 1000;
+  const limite = Date.now() - 6 * 60 * 60 * 1000;
 
-  for (
-    const [id, ts]
-    of mensajesProcesados.entries()
-  ) {
-    if (ts < limite) {
-      mensajesProcesados.delete(
-        id
-      );
-    }
+  for (const [id, ts] of mensajesProcesados.entries()) {
+    if (ts < limite) mensajesProcesados.delete(id);
   }
 
-  if (
-    mensajesProcesados.size >
-    1000
-  ) {
-    const entradas = [
-      ...mensajesProcesados.entries()
-    ]
-      .sort(
-        (a, b) =>
-          a[1] - b[1]
-      )
+  if (mensajesProcesados.size > 1000) {
+    const entradas = [...mensajesProcesados.entries()]
+      .sort((a, b) => a[1] - b[1])
       .slice(-500);
 
     mensajesProcesados.clear();
 
-    for (
-      const [id, ts]
-      of entradas
-    ) {
-      mensajesProcesados.set(
-        id,
-        ts
-      );
+    for (const [id, ts] of entradas) {
+      mensajesProcesados.set(id, ts);
     }
   }
 }
 
 function fechaActualMexico() {
-  return new Intl.DateTimeFormat(
-    "es-MX",
-    {
-      timeZone:
-        ZONA_HORARIA,
-
-      day:
-        "2-digit",
-
-      month:
-        "2-digit",
-
-      year:
-        "numeric"
-    }
-  ).format(
-    new Date()
-  );
-}
-
-function mesActualMexico() {
-  const texto =
-    new Intl.DateTimeFormat(
-      "es-MX",
-      {
-        timeZone:
-          ZONA_HORARIA,
-
-        month:
-          "long",
-
-        year:
-          "numeric"
-      }
-    ).format(
-      new Date()
-    );
-
-  return (
-    texto.charAt(0).toUpperCase() +
-    texto.slice(1)
-  );
+  return new Intl.DateTimeFormat("es-MX", {
+    timeZone: ZONA_HORARIA,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  }).format(new Date());
 }
 
 function fechaISOActualMexico() {
-  const partes =
-    new Intl.DateTimeFormat(
-      "en-CA",
-      {
-        timeZone:
-          ZONA_HORARIA,
-
-        year:
-          "numeric",
-
-        month:
-          "2-digit",
-
-        day:
-          "2-digit"
-      }
-    ).formatToParts(
-      new Date()
-    );
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: ZONA_HORARIA,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
 
   const obj = {};
 
-  for (
-    const p
-    of partes
-  ) {
-    if (
-      p.type !==
-      "literal"
-    ) {
-      obj[p.type] =
-        p.value;
+  for (const p of partes) {
+    if (p.type !== "literal") {
+      obj[p.type] = p.value;
     }
   }
 
-  return (
-    `${obj.year}-` +
-    `${obj.month}-` +
-    `${obj.day}`
-  );
+  return `${obj.year}-${obj.month}-${obj.day}`;
+}
+
+function mesActualMexico() {
+  const texto = new Intl.DateTimeFormat("es-MX", {
+    timeZone: ZONA_HORARIA,
+    month: "long",
+    year: "numeric"
+  }).format(new Date());
+
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
 function finMesActualMexico() {
-  const hoy =
-    fechaISOActualMexico();
+  const [anio, mes] = fechaISOActualMexico()
+    .split("-")
+    .map(Number);
 
-  const [
-    anio,
-    mes
-  ] =
-    hoy
-      .split("-")
-      .map(Number);
-
-  const ultimo =
-    new Date(
-      Date.UTC(
-        anio,
-        mes,
-        0
-      )
-    );
-
-  const d =
-    String(
-      ultimo.getUTCDate()
-    ).padStart(
-      2,
-      "0"
-    );
+  const ultimo = new Date(Date.UTC(anio, mes, 0));
 
   return (
-    `${d}/` +
+    `${String(ultimo.getUTCDate()).padStart(2, "0")}/` +
     `${String(mes).padStart(2, "0")}/` +
     `${anio}`
   );
 }
 
-function formatearDinero(
-  valor
-) {
-  let numero =
-    valor;
+function formatearDinero(valor) {
+  let n =
+    typeof valor === "number"
+      ? valor
+      : Number(String(valor || "").replace(/[^0-9.-]/g, ""));
 
-  if (
-    typeof numero !==
-    "number"
-  ) {
-    numero =
-      Number(
-        String(
-          valor || ""
-        ).replace(
-          /[^0-9.-]/g,
-          ""
-        )
-      );
+  if (!Number.isFinite(n)) {
+    n = 0;
   }
 
-  if (
-    !Number.isFinite(
-      numero
-    )
-  ) {
-    numero = 0;
+  return new Intl.NumberFormat("es-MX", {
+    style: "currency",
+    currency: "MXN"
+  }).format(n);
+}
+
+function valorNumero(valor) {
+  const n = Number(
+    String(valor ?? "").replace(/[$,%\s]/g, "")
+  );
+
+  return Number.isFinite(n) ? n : 0;
+}
+
+function tituloHoja(sheet) {
+  return sheet === "Super" ? "Súper" : sheet;
+}
+
+function valorVisible(valor, tipo = "texto") {
+  if (estaVacio(valor)) {
+    return "⚠️ Falta";
   }
 
-  return new Intl.NumberFormat(
-    "es-MX",
-    {
-      style:
-        "currency",
+  if (tipo === "dinero") {
+    return formatearDinero(valor);
+  }
 
-      currency:
-        "MXN"
-    }
-  ).format(
-    numero
+  return String(valor);
+}
+
+function siguienteCampoFaltante(sheet, data) {
+  return (CAMPOS_REQUERIDOS[sheet] || []).find(
+    campo => estaVacio(data?.[campo])
   );
 }
 
-function valorNumero(
-  valor
-) {
-  const n =
-    Number(
-      String(
-        valor ?? ""
-      ).replace(
-        /[$,%\s]/g,
-        ""
-      )
-    );
-
-  return Number.isFinite(n)
-    ? n
-    : 0;
-}
-
-function siguienteCampoFaltante(
-  sheet,
-  data
-) {
-  const campos =
-    CAMPOS_REQUERIDOS[
-      sheet
-    ] || [];
-
-  return campos.find(
+function camposFaltantesTicket(registros) {
+  return CAMPOS_REQUERIDOS.Super.filter(
     campo =>
-      estaVacio(
-        data[campo]
+      registros.some(
+        r => estaVacio(r?.[campo])
       )
   );
 }
 
-function obtenerPregunta(
-  sheet,
-  campo,
-  data
-) {
-  if (campo === "Fecha de ingreso") {
-    return (
-      '¿Qué fecha le pongo al ingreso?\n' +
-      'Ejemplos: "hoy", "ayer" o "16/08/2026".'
-    );
-  }
+function descripcionCortaCampo(campo) {
+  const mapa = {
+    "Fecha de ingreso": "cuándo recibiste el dinero",
+    "Tipo de ingreso": "sueldo, bono, vales…",
+    "Fecha de pago": "cuándo salió el dinero",
+    "Concepto": "qué pagaste",
+    "Periodo": "mes al que corresponde",
+    "Estado": "Pagado o Pendiente",
+    "Fecha de compra": "día de la compra",
+    "Producto": "marca o presentación",
+    "Producto base": "tipo general, sin marca",
+    "Categoría": "grupo del gasto",
+    "Monto": "total pagado",
+    "Tienda": "lugar de compra",
+    "Cantidad": "número de empaques comprados",
+    "Unidad": "paquete, caja, bolsa, botella…",
+    "Contenido por empaque": "cuánto trae cada empaque",
+    "Unidad de comparación": "rollo, litro, kg, pieza…",
+    "Precio por unidad": "costo por unidad de comparación"
+  };
 
-  if (campo === "Tipo de ingreso") {
-    return (
-      "¿Qué tipo de ingreso es?\n" +
-      "Ejemplos: sueldo, bono, vales, comisión, premio de puntualidad o ingreso extraordinario."
-    );
-  }
-
-  if (
-    sheet === "Ingresos" &&
-    campo === "Monto"
-  ) {
-    return (
-      `¿De cuánto fue el ingreso${
-        data["Tipo de ingreso"]
-          ? ` de ${data["Tipo de ingreso"]}`
-          : ""
-      }?\n` +
-      'Ejemplo: "18,000 pesos".'
-    );
-  }
-
-  if (campo === "Fecha de pago") {
-    return (
-      '¿Qué fecha le pongo al pago?\n' +
-      'Ejemplos: "hoy", "ayer" o "16/08/2026".'
-    );
-  }
-
-  if (campo === "Concepto") {
-    return (
-      "¿Qué pago es?\n" +
-      "Ejemplos: luz, internet, renta, teléfono, tarjeta o seguro."
-    );
-  }
-
-  if (campo === "Periodo") {
-    return (
-      "¿A qué periodo corresponde ese pago?\n" +
-      'Ejemplos: "Agosto 2026" o "Julio 2026".'
-    );
-  }
-
-  if (
-    sheet === "Pagos" &&
-    campo === "Monto"
-  ) {
-    return (
-      `¿Cuál es el monto${
-        data.Concepto
-          ? ` de ${data.Concepto}`
-          : ""
-      }?\n` +
-      'Ejemplo: "850 pesos".'
-    );
-  }
-
-  if (
-    sheet === "Pagos" &&
-    campo === "Estado"
-  ) {
-    return (
-      "¿Cuál es el estado del pago?\n" +
-      'Ejemplos: "Pagado" si ya salió el dinero o "Pendiente" si todavía falta pagarlo.'
-    );
-  }
-
-  if (campo === "Fecha de compra") {
-    return (
-      '¿Qué fecha le pongo a la compra?\n' +
-      'Ejemplos: "hoy", "ayer" o "16/08/2026".'
-    );
-  }
-
-  if (campo === "Producto") {
-    return (
-      "¿Cuál es el producto específico?\n" +
-      "Pon la marca o nombre concreto.\n" +
-      "Ejemplos: Coca-Cola Zero, Galletas Marías Gamesa o Papel Higiénico Regio."
-    );
-  }
-
-  if (campo === "Producto base") {
-    return (
-      "¿Cuál es el producto base?\n" +
-      "Es el tipo general, sin marca ni presentación, para comparar precios después.\n" +
-      "Ejemplos: refresco, galletas, papel higiénico, leche o agua mineral."
-    );
-  }
-
-  if (campo === "Categoría") {
-    return (
-      "¿En qué categoría va?\n" +
-      "Es el grupo general del gasto.\n" +
-      "Ejemplos: bebidas, higiene, limpieza, despensa, lácteos o farmacia."
-    );
-  }
-
-  if (
-    sheet === "Super" &&
-    campo === "Monto"
-  ) {
-    return (
-      `¿Cuánto pagaste en total por ${
-        data.Producto || "ese producto"
-      }?\n` +
-      'Ejemplo: "120 pesos".'
-    );
-  }
-
-  if (campo === "Tienda") {
-    return (
-      "¿En qué tienda lo compraste?\n" +
-      "Ejemplos: Walmart, Costco, Soriana, Chedraui o Farmacia Guadalajara."
-    );
-  }
-
-  if (campo === "Cantidad") {
-    return (
-      "¿Cuántos empaques o productos completos compraste?\n" +
-      "No cuentes aquí las piezas que vienen dentro del empaque.\n" +
-      "Ejemplos: 1 paquete, 2 cajas o 3 botellas.\n" +
-      'Si compraste un paquete de 12 rollos, responde "1".'
-    );
-  }
-
-  if (campo === "Unidad") {
-    return (
-      "¿Cuál es el tipo de empaque o unidad que compraste?\n" +
-      "Ejemplos: paquete, caja, bolsa, botella, lata o pieza."
-    );
-  }
-
-  if (campo === "Contenido por empaque") {
-    return (
-      "¿Cuánto contenido trae cada empaque?\n" +
-      "Ejemplos:\n" +
-      "• Paquete de 12 rollos → 12\n" +
-      "• Caja de 24 latas → 24\n" +
-      "• Paquete con 6 litros → 6\n" +
-      "• Bolsa de 750 g comparada por kilogramo → 0.75"
-    );
-  }
-
-  if (campo === "Unidad de comparación") {
-    return (
-      "¿Con qué unidad quieres comparar el precio?\n" +
-      "Usa una unidad práctica.\n" +
-      "Ejemplos: rollo, litro, kilogramo, pieza o lata.\n" +
-      "Papel higiénico → rollo; leche → litro; arroz → kilogramo."
-    );
-  }
-
-  return `¿Cuál es el valor de ${campo}?`;
+  return mapa[campo] || "dato del registro";
 }
 
-function esSaludoSimple(
-  texto
-) {
-  const t =
-    normalizar(texto)
-      .replace(
-        /[!?.,]/g,
-        " "
-      )
-      .replace(
-        /\s+/g,
-        " "
-      )
-      .trim();
+function ejemploCortoCampo(campo) {
+  const mapa = {
+    "Fecha de ingreso": '"hoy" o "16/08/2026"',
+    "Tipo de ingreso": "sueldo, bono, vales",
+    "Fecha de pago": '"hoy" o "16/08/2026"',
+    "Concepto": "luz, renta, internet",
+    "Periodo": "Agosto 2026",
+    "Estado": "Pagado / Pendiente",
+    "Fecha de compra": '"hoy" o "16/08/2026"',
+    "Producto": "Coca-Cola Zero 600 ml",
+    "Producto base": "refresco",
+    "Categoría": "bebidas",
+    "Monto": "120 pesos",
+    "Tienda": "Walmart",
+    "Cantidad": "1",
+    "Unidad": "paquete",
+    "Contenido por empaque": "12 rollos → 12; 600 ml → 0.6",
+    "Unidad de comparación": "rollo / litro / kilogramo / pieza",
+    "Precio por unidad": "$10 por rollo"
+  };
 
-  const palabras =
-    t
-      .split(" ")
-      .filter(Boolean);
+  return mapa[campo] || "";
+}
+function obtenerPregunta(sheet, campo, data = {}) {
+  let titulo = `*${campo}* (${descripcionCortaCampo(campo)})`;
+  let pregunta = `¿Cuál es el valor?`;
 
-  if (
-    palabras.length >
-    5
-  ) {
+  if (campo === "Monto" && sheet === "Ingresos") {
+    pregunta = `¿De cuánto fue${data["Tipo de ingreso"] ? ` el ${data["Tipo de ingreso"]}` : " el ingreso"}?`;
+  } else if (campo === "Monto" && sheet === "Pagos") {
+    pregunta = `¿Cuánto pagaste${data.Concepto ? ` de ${data.Concepto}` : ""}?`;
+  } else if (campo === "Monto" && sheet === "Super") {
+    pregunta = `¿Cuánto pagaste en total${data.Producto ? ` por ${data.Producto}` : ""}?`;
+  } else if (campo === "Cantidad") {
+    pregunta = "¿Cuántos empaques completos compraste?";
+  } else if (campo === "Contenido por empaque") {
+    pregunta = "¿Cuánto trae cada empaque?";
+  } else if (campo === "Unidad de comparación") {
+    pregunta = "¿Con qué unidad quieres comparar el precio?";
+  }
+
+  const ejemplo = ejemploCortoCampo(campo);
+
+  return [
+    `📝 ${titulo}`,
+    pregunta,
+    ejemplo ? `Ej.: ${ejemplo}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function esSaludoSimple(texto) {
+  const t = normalizar(texto)
+    .replace(/[!?.,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (t.split(" ").filter(Boolean).length > 5) {
     return false;
   }
 
@@ -587,54 +302,53 @@ function esSaludoSimple(
   ].some(
     s =>
       t === s ||
-      t.startsWith(
-        `${s} `
-      )
+      t.startsWith(`${s} `)
   );
 }
 
-function esAyuda(
-  texto
-) {
-  const t =
-    normalizar(texto);
+function esAyuda(texto) {
+  const t = normalizar(texto);
 
-  return (
-    t === "ayuda" ||
-    t === "menu" ||
-    t ===
-      "que puedes hacer" ||
-    t ===
-      "que sabes hacer"
-  );
+  return [
+    "ayuda",
+    "menu",
+    "que puedes hacer",
+    "que sabes hacer"
+  ].includes(t);
 }
 
 function respuestaAyuda() {
   return [
-    "Puedes escribirme de forma natural. Por ejemplo:",
+    "👋 *Finanzas IA*",
+    "Escríbeme como hablas normalmente.",
     "",
-    '• "Compré papel en Walmart por 250 pesos hoy."',
-    '• "Pagué la luz de julio, fueron 850 pesos."',
-    '• "Recibí mi sueldo de 18,000 hoy."',
-    '• "Borra jabón de 250."',
-    '• "Mándame mi reporte de agosto."',
-    '• "Compara el precio del papel de los últimos 2 meses."',
-    '• "Quiero ahorrar 10% de mi sueldo."',
-    '• "Quiero juntar 10,000 para diciembre."',
+    "🛒 *Súper*",
+    '“Compré papel Regio en Walmart por 250.”',
+    "",
+    "💳 *Pagos*",
+    '“Pagué la luz de julio, 850 pesos.”',
+    "",
+    "💰 *Ingresos*",
+    '“Recibí mi sueldo de 18,000 hoy.”',
+    "",
+    "📊 *Reporte*",
+    '“Mándame mi reporte de agosto.”',
+    "",
+    "🏦 *Ahorro*",
+    '“Ahorra 10% de mi sueldo.”',
+    "",
+    "🎯 *Metas*",
+    '“Quiero juntar 10,000 para diciembre.”',
     "",
     "Antes de guardar o eliminar algo, siempre te pediré confirmación."
   ].join("\n");
 }
 
-function respuestaSi(
-  texto
-) {
-  const t =
-    normalizar(texto);
+function respuestaSi(texto) {
+  const t = normalizar(texto);
 
   return [
     "si",
-    "sí",
     "confirmo",
     "confirmar",
     "ok",
@@ -642,105 +356,35 @@ function respuestaSi(
     "correcto",
     "adelante",
     "guardalo",
-    "guárdalo",
     "hazlo"
-  ]
-    .map(
-      normalizar
-    )
-    .includes(t);
+  ].includes(t);
 }
 
-function respuestaNo(
-  texto
-) {
-  const t =
-    normalizar(texto);
+function respuestaNo(texto) {
+  const t = normalizar(texto);
 
   return [
     "no",
     "cancelar",
     "cancela",
-    "cancelalo",
-    "cancélalo"
-  ]
-    .map(
-      normalizar
-    )
-    .includes(t);
+    "cancelalo"
+  ].includes(t);
 }
 
-function quiereGuardarSinAhorro(
-  texto
-) {
-  const t =
-    normalizar(texto);
+function quiereGuardarSinAhorro(texto) {
+  const t = normalizar(texto);
 
   return (
-    t.includes(
-      "sin ahorro"
-    ) ||
-
-    t.includes(
-      "no ahorrar"
-    ) ||
-
-    t.includes(
-      "nada de ahorro"
-    ) ||
-
+    t.includes("sin ahorro") ||
+    t.includes("no ahorrar") ||
+    t.includes("nada de ahorro") ||
     t === "nada" ||
-
     t === "no"
   );
 }
 
-function formatearCampo(
-  campo,
-  valor
-) {
-  if (
-    estaVacio(valor)
-  ) {
-    return "";
-  }
-
-  if (
-    campo ===
-      "Monto" ||
-
-    campo ===
-      "Precio por unidad" ||
-
-    campo ===
-      "Valor del ahorro" ||
-
-    campo ===
-      "Ahorro realizado" ||
-
-    campo ===
-      "Dinero libre"
-  ) {
-    return (
-      `${campo}: ` +
-      formatearDinero(
-        valor
-      )
-    );
-  }
-
-  return (
-    `${campo}: ${valor}`
-  );
-}
-
-function camposParaResumen(
-  sheet
-) {
-  if (
-    sheet ===
-    "Ingresos"
-  ) {
+function camposParaResumen(sheet) {
+  if (sheet === "Ingresos") {
     return [
       "Fecha de ingreso",
       "Tipo de ingreso",
@@ -750,10 +394,7 @@ function camposParaResumen(
     ];
   }
 
-  if (
-    sheet ===
-    "Pagos"
-  ) {
+  if (sheet === "Pagos") {
     return [
       "Fecha de pago",
       "Concepto",
@@ -765,7 +406,7 @@ function camposParaResumen(
     ];
   }
 
-    return [
+  return [
     "Fecha de compra",
     "Producto",
     "Producto base",
@@ -781,126 +422,173 @@ function camposParaResumen(
   ];
 }
 
-function formatearRegistro(
-  sheet,
-  data
-) {
-  return camposParaResumen(
-    sheet
-  )
+function formatearCampo(campo, valor) {
+  if (estaVacio(valor)) {
+    return "";
+  }
+
+  const dinero = [
+    "Monto",
+    "Precio por unidad",
+    "Valor del ahorro",
+    "Ahorro realizado",
+    "Dinero libre"
+  ].includes(campo);
+
+  return `• ${campo}: ${
+    dinero
+      ? formatearDinero(valor)
+      : valor
+  }`;
+}
+
+function formatearRegistro(sheet, data) {
+  return camposParaResumen(sheet)
     .map(
       campo =>
         formatearCampo(
           campo,
-          data[campo]
+          data?.[campo]
         )
     )
     .filter(Boolean)
     .join("\n");
 }
 
-function tituloHoja(
-  sheet
-) {
-  if (
-    sheet ===
-    "Super"
-  ) {
-    return "Súper";
-  }
+function resumenRegistroVisual(sheet, data) {
+  const icono =
+    sheet === "Ingresos"
+      ? "💰"
+      : sheet === "Pagos"
+        ? "💳"
+        : "🛒";
 
-  return sheet;
+  return [
+    `${icono} *${tituloHoja(sheet)}*`,
+    SEPARADOR,
+    formatearRegistro(sheet, data)
+  ].join("\n");
 }
 
-async function enviarMensajeWhatsApp(
-  destinatario,
-  texto
-) {
-  const respuesta =
-    await fetch(
+function dividirMensaje(texto, limite = 3900) {
+  const s = String(texto || "");
+
+  if (s.length <= limite) {
+    return [s];
+  }
+
+  const partes = [];
+  let actual = "";
+
+  for (const bloque of s.split("\n\n")) {
+    const candidato =
+      actual
+        ? `${actual}\n\n${bloque}`
+        : bloque;
+
+    if (candidato.length <= limite) {
+      actual = candidato;
+      continue;
+    }
+
+    if (actual) {
+      partes.push(actual);
+    }
+
+    if (bloque.length <= limite) {
+      actual = bloque;
+    } else {
+      let resto = bloque;
+
+      while (resto.length > limite) {
+        let corte =
+          resto.lastIndexOf(
+            "\n",
+            limite
+          );
+
+        if (corte < limite * 0.5) {
+          corte = limite;
+        }
+
+        partes.push(
+          resto.slice(
+            0,
+            corte
+          )
+        );
+
+        resto = resto
+          .slice(corte)
+          .replace(
+            /^\n+/,
+            ""
+          );
+      }
+
+      actual = resto;
+    }
+  }
+
+  if (actual) {
+    partes.push(actual);
+  }
+
+  return partes;
+}
+async function enviarMensajeWhatsApp(destinatario, texto) {
+  const partes = dividirMensaje(texto);
+  let ultimo = null;
+
+  for (const parte of partes) {
+    const respuesta = await fetch(
       `https://graph.facebook.com/${GRAPH_VERSION}/${PHONE_NUMBER_ID}/messages`,
       {
-        method:
-          "POST",
-
+        method: "POST",
         headers: {
-          Authorization:
-            `Bearer ${WHATSAPP_TOKEN}`,
-
-          "Content-Type":
-            "application/json"
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          "Content-Type": "application/json"
         },
-
-        body:
-          JSON.stringify({
-            messaging_product:
-              "whatsapp",
-
-            to:
-              destinatario,
-
-            type:
-              "text",
-
-            text: {
-              body:
-                String(
-                  texto
-                ).slice(
-                  0,
-                  4096
-                )
-            }
-          })
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: destinatario,
+          type: "text",
+          text: {
+            body: parte
+          }
+        })
       }
     );
 
-  const datos =
-    await respuesta
+    const datos = await respuesta
       .json()
-      .catch(
-        () => ({})
-      );
+      .catch(() => ({}));
 
-  console.log(
-    "Respuesta WhatsApp:",
-    datos
-  );
-
-  if (
-    !respuesta.ok
-  ) {
-    throw new Error(
-      datos?.error
-        ?.message ||
-
-      `WhatsApp respondió HTTP ${respuesta.status}`
+    console.log(
+      "Respuesta WhatsApp:",
+      datos
     );
+
+    if (!respuesta.ok) {
+      throw new Error(
+        datos?.error?.message ||
+        `WhatsApp respondió HTTP ${respuesta.status}`
+      );
+    }
+
+    ultimo = datos;
   }
 
-  return datos;
+  return ultimo;
 }
 
-function extraerJSON(
-  texto
-) {
-  const limpio =
-    String(
-      texto || ""
-    )
-      .replace(
-        /```json/gi,
-        ""
-      )
-      .replace(
-        /```/g,
-        ""
-      )
-      .trim();
+function extraerJSON(texto) {
+  const limpio = String(texto || "")
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
 
-  return JSON.parse(
-    limpio
-  );
+  return JSON.parse(limpio);
 }
 
 async function llamadaGemini({
@@ -908,9 +596,7 @@ async function llamadaGemini({
   parts,
   jsonMode = false
 }) {
-  if (
-    !GEMINI_API_KEY
-  ) {
+  if (!GEMINI_API_KEY) {
     throw new Error(
       "Falta GEMINI_API_KEY."
     );
@@ -920,73 +606,54 @@ async function llamadaGemini({
     system_instruction: {
       parts: [
         {
-          text:
-            systemInstruction
+          text: systemInstruction
         }
       ]
     },
 
     contents: [
       {
-        role:
-          "user",
-
+        role: "user",
         parts
       }
     ]
   };
 
-  if (
-    jsonMode
-  ) {
+  if (jsonMode) {
     body.generationConfig = {
       responseMimeType:
         "application/json",
-
-      temperature:
-        0.1
+      temperature: 0.1
     };
   }
 
-  const respuesta =
-    await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method:
-          "POST",
+  const respuesta = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+    {
+      method: "POST",
 
-        headers: {
-          "Content-Type":
-            "application/json",
+      headers: {
+        "Content-Type":
+          "application/json",
 
-          "x-goog-api-key":
-            GEMINI_API_KEY
-        },
+        "x-goog-api-key":
+          GEMINI_API_KEY
+      },
 
-        body:
-          JSON.stringify(
-            body
-          )
-      }
+      body:
+        JSON.stringify(body)
+    }
+  );
+
+  const datos = await respuesta
+    .json()
+    .catch(() => ({}));
+
+  if (!respuesta.ok) {
+    const error = new Error(
+      datos?.error?.message ||
+      `Gemini respondió HTTP ${respuesta.status}`
     );
-
-  const datos =
-    await respuesta
-      .json()
-      .catch(
-        () => ({})
-      );
-
-  if (
-    !respuesta.ok
-  ) {
-    const error =
-      new Error(
-        datos?.error
-          ?.message ||
-
-        `Gemini respondió HTTP ${respuesta.status}`
-      );
 
     error.status =
       respuesta.status;
@@ -1002,16 +669,13 @@ async function llamadaGemini({
       ?.candidates?.[0]
       ?.content?.parts
       ?.map(
-        parte =>
-          parte.text
+        p => p.text
       )
       .filter(Boolean)
       .join("\n")
       .trim();
 
-  if (
-    !texto
-  ) {
+  if (!texto) {
     throw new Error(
       "Gemini no devolvió texto."
     );
@@ -1032,40 +696,32 @@ function instruccionesFinanzas(
   const contexto =
     contextoRegistro
       ? `
-Hay una operación en curso.
+OPERACIÓN EN CURSO
 
-Hoja actual:
+Hoja:
 ${contextoRegistro.sheet}
 
 Datos actuales:
 ${JSON.stringify(
-  contextoRegistro.data ||
-  {}
+  contextoRegistro.data || {}
 )}
 
-Campo que falta:
+Campo faltante:
 ${
   siguienteCampoFaltante(
     contextoRegistro.sheet,
-    contextoRegistro.data ||
-      {}
-  ) ||
-  "ninguno"
+    contextoRegistro.data || {}
+  ) || "ninguno"
 }
-
-El nuevo mensaje puede:
-- contestar el campo faltante;
-- corregir uno o más datos anteriores;
-- agregar notas o información opcional.
 
 Conserva los datos anteriores salvo que el usuario los corrija explícitamente.
 `
       : "";
 
   return `
-Eres Finanzas IA, un asistente personal de finanzas que funciona por WhatsApp.
+Eres Finanzas IA, un asistente personal de finanzas por WhatsApp.
 
-RESPONDE ÚNICAMENTE CON JSON VÁLIDO.
+RESPONDE ÚNICAMENTE JSON VÁLIDO.
 No uses markdown.
 No escribas nada fuera del JSON.
 
@@ -1075,30 +731,22 @@ ${hoy}
 Mes actual:
 ${mesActual}
 
-Tu trabajo es ENTENDER lenguaje natural.
-El usuario no tiene que usar comandos exactos.
+REGLAS:
 
-REGLAS GENERALES:
+- Entiende lenguaje natural.
+- No exijas comandos exactos.
+- Nunca inventes montos, tiendas, cantidades, fechas, periodos ni formas de pago.
+- Sí puedes inferir Producto base y Categoría cuando sea obvio.
+- Si no estás seguro, deja el campo vacío.
+- Convierte hoy, ayer, mañana y fechas relativas a DD/MM/AAAA cuando sean claras.
+- Si el usuario ya pagó algo, Estado puede ser Pagado.
+- Si falta pagarlo, Estado puede ser Pendiente.
+- Periodo de Pagos debe ser "Mes AAAA".
+- Los montos son números sin signo de pesos.
+- Nunca digas que algo ya se guardó o eliminó.
+- El sistema hará la confirmación final.
 
-- Nunca inventes montos, tiendas, cantidades, fechas, periodos o formas de pago.
-- Sí puedes inferir "Producto base" y "Categoría" cuando sea obvio a partir del producto.
-- Si no estás seguro, deja ese campo vacío para que el sistema pregunte.
-- Convierte "hoy", "ayer", "mañana", "el próximo viernes", etc. a una fecha exacta DD/MM/AAAA.
-- Si una expresión de fecha es realmente ambigua, deja la fecha vacía.
-- Si el usuario dice que YA pagó algo, Estado puede ser "Pagado".
-- Si dice que lo pagará después o que está pendiente, Estado puede ser "Pendiente".
-- En Ingresos y Super no necesitas inventar Estado.
-- Si menciona un mes sin año, usa el año actual.
-- Periodo de Pagos debe quedar como "Mes AAAA", por ejemplo "Julio 2026".
-- "Fecha de pago" es cuándo salió el dinero.
-- "Periodo" es el mes al que corresponde el pago.
-- No confundas fecha con producto, concepto o monto.
-- Los montos deben ser números, sin signo de pesos.
-- "sin notas" significa Notas = "".
-- Si el usuario pide cambiar o corregir un dato, devuelve el registro completo actualizado.
-- Nunca confirmes que algo se guardó o eliminó. El sistema hará la confirmación final.
-
-HOJAS Y CAMPOS:
+HOJAS:
 
 Ingresos:
 Estado,
@@ -1107,7 +755,7 @@ Tipo de ingreso,
 Monto,
 Forma de pago,
 Notas,
-Registro de mensaje enviado
+Registro de mensaje enviado.
 
 Pagos:
 Estado,
@@ -1117,7 +765,7 @@ Periodo,
 Monto,
 Forma de pago,
 Notas,
-Registro de mensaje enviado
+Registro de mensaje enviado.
 
 Super:
 Estado,
@@ -1133,23 +781,54 @@ Contenido por empaque,
 Unidad de comparación,
 Precio por unidad,
 Notas,
-Registro de mensaje enviado
+Registro de mensaje enviado.
 
-REGLAS ESPECÍFICAS PARA SUPER:
-- Producto es el artículo específico, incluyendo marca o presentación cuando se conozca. Ejemplos: "Coca-Cola Zero 600 ml", "Papel Higiénico Regio 12 rollos".
-- Producto base es el artículo general que sirve para comparar. Ejemplos: "Refresco", "Papel higiénico", "Leche".
-- Categoría es el grupo general del gasto. Ejemplos: "Bebidas", "Higiene", "Lácteos", "Despensa".
-- Cantidad es el número de empaques o productos completos comprados. Ejemplo: si compró 1 paquete de 12 rollos, Cantidad = 1.
-- Unidad es el tipo de empaque comprado. Ejemplos: paquete, caja, bolsa, botella, lata, pieza.
-- Contenido por empaque indica cuánto trae CADA empaque expresado en la Unidad de comparación.
-- Ejemplo: paquete de 12 rollos => Contenido por empaque = 12 y Unidad de comparación = "rollo".
-- Ejemplo: botella de 600 ml => Contenido por empaque = 0.6 y Unidad de comparación = "litro".
-- Ejemplo: bolsa de 750 g => Contenido por empaque = 0.75 y Unidad de comparación = "kilogramo".
-- Unidad de comparación debe ser una unidad práctica para comparar precios: rollo, litro, kilogramo, pieza, lata, etc.
-- No inventes Cantidad, Unidad, Contenido por empaque ni Unidad de comparación si el usuario no los dijo o no pueden inferirse con seguridad.
-- Precio por unidad puede quedar vacío; el sistema lo calculará automáticamente.
+REGLAS DE SÚPER:
 
-1) REGISTRAR
+- Producto = artículo específico, marca o presentación.
+Ejemplo: Coca-Cola Zero 600 ml.
+
+- Producto base = tipo general comparable.
+Ejemplo: refresco.
+
+- Categoría = grupo general.
+Ejemplo: bebidas.
+
+- Cantidad = número de empaques completos comprados.
+Ejemplo:
+Un paquete de 12 rollos => Cantidad = 1.
+
+- Unidad = tipo de empaque:
+paquete,
+caja,
+bolsa,
+botella,
+lata,
+pieza.
+
+- Contenido por empaque = contenido de CADA empaque expresado en Unidad de comparación.
+
+Ejemplos:
+
+12 rollos:
+Contenido por empaque = 12
+Unidad de comparación = rollo
+
+600 ml:
+Contenido por empaque = 0.6
+Unidad de comparación = litro
+
+750 g:
+Contenido por empaque = 0.75
+Unidad de comparación = kilogramo
+
+- No inventes Cantidad, Unidad, Contenido por empaque ni Unidad de comparación.
+- Precio por unidad puede quedar vacío.
+- El sistema lo calculará automáticamente.
+
+ACCIONES POSIBLES:
+
+1. REGISTRAR
 
 {
   "accion": "registrar",
@@ -1158,56 +837,25 @@ REGLAS ESPECÍFICAS PARA SUPER:
   "respuesta": ""
 }
 
-Ejemplos:
-
-"Compré papel Regio de 12 rollos en Walmart por 250 hoy"
-
-=> Super.
-Producto puede conservar marca/presentación.
-Producto base debe ser "Papel higiénico".
-Categoría puede inferirse como "Higiene".
-
-"Ya pagué la luz de julio, 850 pesos, hoy"
-
-=> Pagos.
-Concepto "Luz".
-Periodo debe incluir mes y año.
-Estado "Pagado".
-
-"Me depositaron mi sueldo hoy, 18000"
-
-=> Ingresos.
-Tipo de ingreso "Sueldo".
-
-2) ELIMINAR
+2. ELIMINAR
 
 {
   "accion": "eliminar",
   "sheet": "Ingresos|Pagos|Super",
-  "buscar": "texto útil para buscar",
+  "buscar": "texto útil",
   "respuesta": ""
 }
 
-Si el usuario dice "borra jabón 250",
-normalmente corresponde a Super.
-
-No elijas cuál registro borrar si puede haber varios.
-
-3) REPORTE
+3. REPORTE
 
 {
   "accion": "reporte",
   "mes": "Agosto 2026",
-  "grafica": true,
+  "grafica": false,
   "respuesta": ""
 }
 
-Usa grafica=true si pide gráfica, visual, imagen o reporte visual.
-
-Si dice "este mes",
-usa ${mesActual}.
-
-4) HISTORIAL DE PRECIO
+4. HISTORIAL DE PRODUCTO
 
 {
   "accion": "historial_producto",
@@ -1216,7 +864,7 @@ usa ${mesActual}.
   "respuesta": ""
 }
 
-5) CONFIGURAR AHORRO
+5. CONFIGURAR AHORRO
 
 {
   "accion": "configurar_ahorro",
@@ -1227,27 +875,7 @@ usa ${mesActual}.
   "respuesta": ""
 }
 
-Ejemplos:
-
-"De ahora en adelante ahorra 15% de mi sueldo"
-
-=> Porcentaje,
-valor 15,
-permanente.
-
-"Este mes ahorra 2000 de mi bono"
-
-=> Monto fijo,
-valor 2000,
-este_mes.
-
-"Ya no quiero ahorrar de mis vales"
-
-=> Apagado,
-valor 0,
-permanente.
-
-6) META DE AHORRO
+6. META DE AHORRO
 
 {
   "accion": "meta_ahorro",
@@ -1257,24 +885,21 @@ permanente.
   "respuesta": ""
 }
 
-Si dice "para fin de año",
-usa 31/12 del año actual.
-
-7) VER METAS
+7. VER METAS
 
 {
   "accion": "metas_resumen",
   "respuesta": ""
 }
 
-8) CANCELAR
+8. CANCELAR
 
 {
   "accion": "cancelar",
   "respuesta": "Operación cancelada."
 }
 
-9) CONVERSACIÓN NORMAL
+9. CONVERSAR
 
 {
   "accion": "conversar",
@@ -1341,7 +966,7 @@ async function transcribirAudio(
 
       {
         text:
-          "Transcribe el mensaje de voz. Conserva números, fechas, nombres de tiendas y cantidades con precisión."
+          "Conserva números, fechas, nombres de tiendas y cantidades con precisión."
       }
     ],
 
@@ -1354,24 +979,15 @@ async function interpretarImagen(
   buffer,
   mimeType
 ) {
-  const hoy =
-    fechaActualMexico();
-
-  const mes =
-    mesActualMexico();
-
   const systemInstruction = `
-Analiza una foto enviada a un asistente de finanzas personales.
+Analiza una foto enviada a Finanzas IA.
 
 RESPONDE ÚNICAMENTE JSON VÁLIDO.
 
 Fecha actual:
-${hoy}
+${fechaActualMexico()}
 
-Mes actual:
-${mes}
-
-Si es un ticket de supermercado, devuelve:
+Si es ticket de supermercado:
 
 {
   "accion": "ticket_super",
@@ -1393,27 +1009,39 @@ Si es un ticket de supermercado, devuelve:
   ]
 }
 
-Reglas para ticket_super:
-- Extrae solo información que realmente se vea o que pueda inferirse con seguridad.
-- No inventes productos, precios, cantidades, contenido ni presentaciones.
-- Producto conserva marca y presentación cuando puedan identificarse. Ejemplo: "Coca-Cola Zero 600 ml".
-- Producto base es el producto general sin marca ni presentación. Ejemplo: "Refresco".
-- Categoría es el grupo general. Ejemplo: "Bebidas".
-- Cantidad es cuántos empaques o productos completos se compraron.
-- Ejemplo: 1 paquete de 12 rollos => Cantidad = 1.
-- Unidad es el tipo de empaque comprado: paquete, caja, bolsa, botella, lata, pieza, etc.
-- Contenido por empaque es cuánto trae CADA empaque expresado en la Unidad de comparación.
-- Ejemplo: paquete de 12 rollos => Contenido por empaque = 12 y Unidad de comparación = "rollo".
-- Ejemplo: botella de 600 ml => Contenido por empaque = 0.6 y Unidad de comparación = "litro".
-- Ejemplo: bolsa de 750 g => Contenido por empaque = 0.75 y Unidad de comparación = "kilogramo".
-- Usa unidades prácticas para comparar precios; evita unidades diminutas como mililitro cuando sea más útil comparar por litro.
-- Si la presentación no puede determinarse con seguridad, deja Cantidad, Unidad, Contenido por empaque o Unidad de comparación vacíos según corresponda.
-- Deja Precio por unidad vacío. El sistema lo calculará automáticamente usando Monto, Cantidad y Contenido por empaque.
-- Fecha debe ser DD/MM/AAAA.
-- Si no se ve la fecha, déjala vacía.
-- Si no se ve la tienda, déjala vacía.
+REGLAS:
 
-Si es un recibo o comprobante de un servicio/pago, devuelve:
+- Extrae solo lo visible o inferible con seguridad.
+- No inventes.
+- Producto conserva marca o presentación cuando pueda identificarse.
+- Producto base es el tipo general.
+- Categoría es el grupo general.
+- Cantidad es cuántos empaques completos se compraron.
+- Unidad es paquete, caja, bolsa, botella, lata, pieza, etc.
+- Contenido por empaque se expresa en una unidad práctica de comparación.
+
+Ejemplos:
+
+12 rollos:
+Contenido por empaque = 12
+Unidad de comparación = rollo
+
+600 ml:
+Contenido por empaque = 0.6
+Unidad de comparación = litro
+
+750 g:
+Contenido por empaque = 0.75
+Unidad de comparación = kilogramo
+
+- Si no estás seguro de presentación, cantidad, unidad o contenido, déjalos vacíos.
+- Deja Precio por unidad vacío.
+- El sistema lo calculará.
+- Fecha debe ser DD/MM/AAAA.
+- Si no se ve, déjala vacía.
+- Si no se identifica la tienda, déjala vacía.
+
+Si es recibo o comprobante de pago:
 
 {
   "accion": "ticket_pago",
@@ -1426,15 +1054,17 @@ Si es un recibo o comprobante de un servicio/pago, devuelve:
   }
 }
 
-- Si el documento acredita que ya fue pagado, Estado puede ser "Pagado".
-- Si es solo un recibo por pagar y no demuestra pago, deja Estado vacío.
-- Periodo debe ser "Mes AAAA" cuando pueda determinarse.
+- Si prueba que ya fue pagado:
+Estado = Pagado.
 
-Si no puedes clasificarlo con seguridad:
+- Si no demuestra pago:
+deja Estado vacío.
+
+Si no puedes clasificarlo:
 
 {
   "accion": "imagen_desconocida",
-  "descripcion": "explica brevemente qué alcanzas a leer"
+  "descripcion": "qué alcanzas a leer"
 }
 `.trim();
 
@@ -1458,7 +1088,7 @@ Si no puedes clasificarlo con seguridad:
 
         {
           text:
-            "Extrae la información financiera de esta imagen siguiendo exactamente el esquema indicado."
+            "Extrae la información financiera siguiendo exactamente el esquema."
         }
       ],
 
@@ -1486,14 +1116,11 @@ function combinarDatos(
 
   if (
     nuevos &&
-    typeof nuevos ===
-      "object"
+    typeof nuevos === "object"
   ) {
     for (
       const [campo, valor]
-      of Object.entries(
-        nuevos
-      )
+      of Object.entries(nuevos)
     ) {
       if (
         !estaVacio(valor) ||
@@ -1508,52 +1135,106 @@ function combinarDatos(
   return resultado;
 }
 
-async function llamarAppsScript(
-  payload
+function completarDatosCalculados(
+  sheet,
+  data,
+  mensajeOriginal = ""
 ) {
+  const resultado = {
+    ...(data || {})
+  };
+
   if (
-    !APPS_SCRIPT_URL
+    mensajeOriginal &&
+    estaVacio(
+      resultado[
+        "Registro de mensaje enviado"
+      ]
+    )
   ) {
-    throw new Error(
-      "Falta APPS_SCRIPT_URL."
-    );
+    resultado[
+      "Registro de mensaje enviado"
+    ] =
+      mensajeOriginal;
   }
 
   if (
-    !APPS_SCRIPT_SECRET
+    sheet === "Super"
   ) {
-    throw new Error(
-      "Falta APPS_SCRIPT_SECRET."
-    );
+    const monto =
+      valorNumero(
+        resultado.Monto
+      );
+
+    const cantidad =
+      valorNumero(
+        resultado.Cantidad
+      );
+
+    const contenido =
+      valorNumero(
+        resultado[
+          "Contenido por empaque"
+        ]
+      );
+
+    const unidades =
+      cantidad *
+      contenido;
+
+    if (
+      monto > 0 &&
+      cantidad > 0 &&
+      contenido > 0 &&
+      unidades > 0
+    ) {
+      resultado[
+        "Precio por unidad"
+      ] =
+        Math.round(
+          (
+            monto /
+            unidades
+          ) *
+          100
+        ) /
+        100;
+    } else if (
+      [
+        "",
+        undefined,
+        null
+      ].includes(
+        resultado[
+          "Precio por unidad"
+        ]
+      )
+    ) {
+      resultado[
+        "Precio por unidad"
+      ] = "";
+    }
   }
 
-  const respuesta =
-    await fetch(
-      APPS_SCRIPT_URL,
-      {
-        method:
-          "POST",
+  return resultado;
+}
+async function llamarAppsScript(payload) {
+  if (!APPS_SCRIPT_URL) throw new Error("Falta APPS_SCRIPT_URL.");
+  if (!APPS_SCRIPT_SECRET) throw new Error("Falta APPS_SCRIPT_SECRET.");
 
-        headers: {
-          "Content-Type":
-            "application/json"
-        },
+  const respuesta = await fetch(APPS_SCRIPT_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      secret: APPS_SCRIPT_SECRET,
+      ...payload
+    }),
+    redirect: "follow"
+  });
 
-        body:
-          JSON.stringify({
-            secret:
-              APPS_SCRIPT_SECRET,
-
-            ...payload
-          }),
-
-        redirect:
-          "follow"
-      }
-    );
-
-  const texto =
-    await respuesta.text();
+  const texto = await respuesta.text();
 
   console.log(
     "Respuesta Apps Script:",
@@ -1563,23 +1244,15 @@ async function llamarAppsScript(
   let datos;
 
   try {
-    datos =
-      JSON.parse(
-        texto
-      );
+    datos = JSON.parse(texto);
   } catch {
     throw new Error(
       "Apps Script no devolvió JSON. Respuesta: " +
-      texto.slice(
-        0,
-        200
-      )
+      texto.slice(0, 200)
     );
   }
 
-  if (
-    !datos.ok
-  ) {
+  if (!datos.ok) {
     throw new Error(
       datos.error ||
       "Apps Script rechazó la operación."
@@ -1589,65 +1262,51 @@ async function llamarAppsScript(
   return datos;
 }
 
-async function obtenerMediaWhatsApp(
-  mediaId
-) {
-  const respuesta =
-    await fetch(
-      `https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}`,
-      {
-        headers: {
-          Authorization:
-            `Bearer ${WHATSAPP_TOKEN}`
-        }
+async function obtenerMediaWhatsApp(mediaId) {
+  const respuesta = await fetch(
+    `https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}`,
+    {
+      headers: {
+        Authorization:
+          `Bearer ${WHATSAPP_TOKEN}`
       }
-    );
+    }
+  );
 
-  const datos =
-    await respuesta
-      .json()
-      .catch(
-        () => ({})
-      );
+  const datos = await respuesta
+    .json()
+    .catch(() => ({}));
 
   if (
     !respuesta.ok ||
     !datos.url
   ) {
     throw new Error(
-      datos?.error
-        ?.message ||
-
+      datos?.error?.message ||
       "No pude obtener la URL del archivo de WhatsApp."
     );
   }
 
-  const descarga =
-    await fetch(
-      datos.url,
-      {
-        headers: {
-          Authorization:
-            `Bearer ${WHATSAPP_TOKEN}`
-        }
+  const descarga = await fetch(
+    datos.url,
+    {
+      headers: {
+        Authorization:
+          `Bearer ${WHATSAPP_TOKEN}`
       }
-    );
+    }
+  );
 
-  if (
-    !descarga.ok
-  ) {
+  if (!descarga.ok) {
     throw new Error(
       `No pude descargar el archivo de WhatsApp. HTTP ${descarga.status}`
     );
   }
 
-  const arrayBuffer =
-    await descarga.arrayBuffer();
-
   return {
     buffer:
       Buffer.from(
-        arrayBuffer
+        await descarga.arrayBuffer()
       ),
 
     mimeType:
@@ -1659,143 +1318,94 @@ async function obtenerMediaWhatsApp(
   };
 }
 
-async function buscarParaEliminar(
-  sheet,
-  buscar
-) {
-  return llamarAppsScript({
-    action:
-      "buscar_eliminar",
+const buscarParaEliminar =
+  (sheet, buscar) =>
+    llamarAppsScript({
+      action: "buscar_eliminar",
+      sheet,
+      buscar
+    });
 
-    sheet,
-    buscar
-  });
-}
+const eliminarEnSheets =
+  (sheet, seleccion) =>
+    llamarAppsScript({
+      action: "eliminar",
+      sheet,
+      fila: seleccion.fila,
+      esperado: seleccion.data
+    });
 
-async function eliminarEnSheets(
-  sheet,
-  seleccion
-) {
-  return llamarAppsScript({
-    action:
-      "eliminar",
+const guardarEnSheets =
+  (sheet, data) =>
+    llamarAppsScript({
+      action: "registrar",
+      sheet,
+      data
+    });
 
-    sheet,
+const buscarSimilares =
+  (sheet, data) =>
+    llamarAppsScript({
+      action: "buscar_similares",
+      sheet,
+      data
+    });
 
-    fila:
-      seleccion.fila,
+const consultarReporte =
+  mes =>
+    llamarAppsScript({
+      action: "reporte",
+      mes
+    });
 
-    esperado:
-      seleccion.data
-  });
-}
+const consultarHistorialProducto =
+  (producto, meses) =>
+    llamarAppsScript({
+      action:
+        "historial_producto",
+      producto,
+      meses
+    });
 
-async function guardarEnSheets(
-  sheet,
-  data
-) {
-  return llamarAppsScript({
-    action:
-      "registrar",
+const listarConfig =
+  () =>
+    llamarAppsScript({
+      action: "config_listar"
+    });
 
-    sheet,
-    data
-  });
-}
+const guardarConfig =
+  data =>
+    llamarAppsScript({
+      action: "config_guardar",
+      data
+    });
 
-async function buscarSimilares(
-  sheet,
-  data
-) {
-  return llamarAppsScript({
-    action:
-      "buscar_similares",
+const guardarAhorro =
+  data =>
+    llamarAppsScript({
+      action: "ahorro_guardar",
+      data
+    });
 
-    sheet,
-    data
-  });
-}
+const guardarMeta =
+  data =>
+    llamarAppsScript({
+      action: "meta_guardar",
+      data
+    });
 
-async function consultarReporte(
-  mes
-) {
-  return llamarAppsScript({
-    action:
-      "reporte",
+const consultarMetas =
+  () =>
+    llamarAppsScript({
+      action: "metas_resumen"
+    });
 
-    mes
-  });
-}
-
-async function consultarHistorialProducto(
-  producto,
-  meses
-) {
-  return llamarAppsScript({
-    action:
-      "historial_producto",
-
-    producto,
-    meses
-  });
-}
-
-async function listarConfig() {
-  return llamarAppsScript({
-    action:
-      "config_listar"
-  });
-}
-
-async function guardarConfig(
-  data
-) {
-  return llamarAppsScript({
-    action:
-      "config_guardar",
-
-    data
-  });
-}
-
-async function guardarAhorro(
-  data
-) {
-  return llamarAppsScript({
-    action:
-      "ahorro_guardar",
-
-    data
-  });
-}
-
-async function guardarMeta(
-  data
-) {
-  return llamarAppsScript({
-    action:
-      "meta_guardar",
-
-    data
-  });
-}
-
-async function consultarMetas() {
-  return llamarAppsScript({
-    action:
-      "metas_resumen"
-  });
-}
-
-function fechaComparableDDMMYYYY(
-  texto
-) {
+function fechaComparableDDMMYYYY(texto) {
   const m =
-    String(
-      texto || ""
-    ).match(
-      /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/
-    );
+    String(texto || "")
+      .match(
+        /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/
+      );
 
   if (!m) {
     return null;
@@ -1808,9 +1418,7 @@ function fechaComparableDDMMYYYY(
   );
 }
 
-function reglaEstaVigente(
-  regla
-) {
+function reglaEstaVigente(regla) {
   const activo =
     normalizar(
       regla.Activo
@@ -1823,9 +1431,7 @@ function reglaEstaVigente(
       "false",
       "inactivo",
       "apagado"
-    ].includes(
-      activo
-    )
+    ].includes(activo)
   ) {
     return false;
   }
@@ -1860,15 +1466,9 @@ function reglaEstaVigente(
   return true;
 }
 
-async function obtenerReglaAhorro(
-  tipoIngreso
-) {
+async function obtenerReglaAhorro(tipoIngreso) {
   const resultado =
     await listarConfig();
-
-  const registros =
-    resultado.registros ||
-    [];
 
   const tipo =
     normalizar(
@@ -1876,35 +1476,23 @@ async function obtenerReglaAhorro(
     );
 
   const reglas =
-    registros.filter(
-      r => {
-        return (
-          normalizar(
-            r.Tipo
-          ) ===
-            "ahorro" &&
-
-          normalizar(
-            r.Clave
-          ) ===
-            tipo &&
-
-          reglaEstaVigente(
-            r
-          )
-        );
-      }
+    (
+      resultado.registros ||
+      []
+    ).filter(
+      r =>
+        normalizar(r.Tipo) ===
+          "ahorro" &&
+        normalizar(r.Clave) ===
+          tipo &&
+        reglaEstaVigente(r)
     );
 
-  if (
-    !reglas.length
-  ) {
-    return null;
-  }
-
-  return reglas[
-    reglas.length - 1
-  ];
+  return reglas.length
+    ? reglas[
+        reglas.length - 1
+      ]
+    : null;
 }
 
 function calcularAhorro(
@@ -1934,8 +1522,7 @@ function calcularAhorro(
   }
 
   if (
-    m ===
-    "porcentaje"
+    m === "porcentaje"
   ) {
     return (
       Math.round(
@@ -1951,14 +1538,15 @@ function calcularAhorro(
   }
 
   if (
-    m ===
-      "monto fijo" ||
-    m ===
+    [
+      "monto fijo",
       "monto"
+    ].includes(m)
   ) {
     return (
       Math.round(
-        v * 100
+        v *
+        100
       ) /
       100
     );
@@ -1977,8 +1565,7 @@ function descripcionReglaAhorro(
     );
 
   if (
-    m ===
-    "porcentaje"
+    m === "porcentaje"
   ) {
     return (
       `${valorNumero(valor)}%`
@@ -1986,22 +1573,22 @@ function descripcionReglaAhorro(
   }
 
   if (
-    m ===
-      "monto fijo" ||
-    m ===
+    [
+      "monto fijo",
       "monto"
+    ].includes(m)
   ) {
-    return formatearDinero(
-      valor
+    return (
+      formatearDinero(
+        valor
+      )
     );
   }
 
   return "Sin ahorro";
 }
 
-function detectarAhorroRapido(
-  texto
-) {
+function detectarAhorroRapido(texto) {
   const t =
     normalizar(
       texto
@@ -2012,9 +1599,7 @@ function detectarAhorroRapido(
       /(\d+(?:[.,]\d+)?)\s*%/
     );
 
-  if (
-    porcentaje
-  ) {
+  if (porcentaje) {
     return {
       modo:
         "Porcentaje",
@@ -2031,15 +1616,12 @@ function detectarAhorroRapido(
   }
 
   const monto =
-    String(
-      texto
-    ).match(
-      /(?:\$|mxn\s*)?(\d[\d,.\s]*)\s*(?:pesos?)?/i
-    );
+    String(texto)
+      .match(
+        /(?:\$|mxn\s*)?(\d[\d,.\s]*)\s*(?:pesos?)?/i
+      );
 
-  if (
-    monto
-  ) {
+  if (monto) {
     const n =
       Number(
         monto[1]
@@ -2054,9 +1636,7 @@ function detectarAhorroRapido(
       );
 
     if (
-      Number.isFinite(
-        n
-      )
+      Number.isFinite(n)
     ) {
       return {
         modo:
@@ -2071,9 +1651,7 @@ function detectarAhorroRapido(
   return null;
 }
 
-function detectarAlcance(
-  texto
-) {
+function detectarAlcance(texto) {
   const t =
     normalizar(
       texto
@@ -2083,11 +1661,9 @@ function detectarAlcance(
     t.includes(
       "solo esta vez"
     ) ||
-
     t.includes(
       "esta vez"
     ) ||
-
     t.includes(
       "una vez"
     )
@@ -2099,7 +1675,6 @@ function detectarAlcance(
     t.includes(
       "este mes"
     ) ||
-
     t.includes(
       "solo este mes"
     )
@@ -2111,15 +1686,12 @@ function detectarAlcance(
     t.includes(
       "de ahora en adelante"
     ) ||
-
     t.includes(
       "a partir de hoy"
     ) ||
-
     t.includes(
       "siempre"
     ) ||
-
     t.includes(
       "permanente"
     )
@@ -2184,8 +1756,7 @@ function resumenDuplicados(
   coincidencias
 ) {
   if (
-    !coincidencias
-      ?.length
+    !coincidencias?.length
   ) {
     return "";
   }
@@ -2230,7 +1801,7 @@ function resumenDuplicados(
             !estaVacio(
               d.Monto
             )
-              ? ` - ${formatearDinero(
+              ? ` · ${formatearDinero(
                   d.Monto
                 )}`
               : "";
@@ -2241,7 +1812,7 @@ function resumenDuplicados(
             `${monto}` +
             `${
               fecha
-                ? ` - ${fecha}`
+                ? ` · ${fecha}`
                 : ""
             }`
           );
@@ -2250,79 +1821,10 @@ function resumenDuplicados(
       .join("\n");
 
   return (
-    "\n\n⚠️ Encontré un posible duplicado:\n" +
+    "\n\n⚠️ *Posible duplicado*\n" +
     lista +
-    "\nSi lo confirmas, se guardará de todos modos."
+    "\nSi confirmas, se guardará de todos modos."
   );
-}
-function completarDatosCalculados(
-  sheet,
-  data,
-  mensajeOriginal = ""
-) {
-  const resultado = {
-    ...(data || {})
-  };
-
-  if (
-    mensajeOriginal &&
-    estaVacio(
-      resultado[
-        "Registro de mensaje enviado"
-      ]
-    )
-  ) {
-    resultado[
-      "Registro de mensaje enviado"
-    ] =
-      mensajeOriginal;
-  }
-
-  if (
-    sheet === "Super"
-  ) {
-    const monto =
-      valorNumero(
-        resultado.Monto
-      );
-
-    const cantidad =
-      valorNumero(
-        resultado.Cantidad
-      );
-
-    const contenido =
-      valorNumero(
-        resultado[
-          "Contenido por empaque"
-        ]
-      );
-
-    const unidadesComparables =
-      cantidad *
-      contenido;
-
-    if (
-      monto > 0 &&
-      cantidad > 0 &&
-      contenido > 0 &&
-      unidadesComparables > 0
-    ) {
-      resultado[
-        "Precio por unidad"
-      ] =
-        Math.round(
-          (
-            monto /
-            unidadesComparables
-          ) *
-          100
-        ) /
-        100;
-    }
-  }
-
-  return resultado;
 }
 
 async function prepararConfirmacionRegistro(
@@ -2379,7 +1881,6 @@ async function prepararConfirmacionRegistro(
     duplicados =
       r.coincidencias ||
       [];
-
   } catch (error) {
     console.error(
       "No se pudo revisar duplicados:",
@@ -2387,8 +1888,11 @@ async function prepararConfirmacionRegistro(
     );
   }
 
-  let reglaAhorro = null;
-  let ahorroCalculado = 0;
+  let reglaAhorro =
+    null;
+
+  let ahorroCalculado =
+    0;
 
   if (
     sheet ===
@@ -2402,9 +1906,7 @@ async function prepararConfirmacionRegistro(
           ]
         );
 
-      if (
-        reglaAhorro
-      ) {
+      if (reglaAhorro) {
         ahorroCalculado =
           calcularAhorro(
             completos.Monto,
@@ -2412,7 +1914,6 @@ async function prepararConfirmacionRegistro(
             reglaAhorro.Valor
           );
       }
-
     } catch (error) {
       console.error(
         "No se pudo consultar regla de ahorro:",
@@ -2442,13 +1943,13 @@ async function prepararConfirmacionRegistro(
     }
   );
 
-  let texto =
-    `Antes de guardar, revisa:\n\n` +
-    `${tituloHoja(sheet)}\n` +
-    `${formatearRegistro(
+  let texto = [
+    "✅ *Antes de guardar, revisa*",
+    resumenRegistroVisual(
       sheet,
       completos
-    )}`;
+    )
+  ].join("\n\n");
 
   if (
     sheet ===
@@ -2460,38 +1961,33 @@ async function prepararConfirmacionRegistro(
       ];
 
     if (
+      reglaAhorro &&
+      normalizar(
+        reglaAhorro.Modo
+      ) !==
+        "apagado"
+    ) {
+      texto +=
+        `\n\n🏦 *Ahorro*\n` +
+        `Regla: ${descripcionReglaAhorro(
+          reglaAhorro.Modo,
+          reglaAhorro.Valor
+        )}\n` +
+        `Se separarían: ${formatearDinero(
+          ahorroCalculado
+        )}`;
+
+    } else if (
       reglaAhorro
     ) {
-      if (
-        normalizar(
-          reglaAhorro.Modo
-        ) ===
-        "apagado"
-      ) {
-        texto +=
-          `\n\nAhorro: actualmente no estás ahorrando de ${tipo}.`;
-
-      } else {
-        texto +=
-          `\n\nAhorro actual para ${tipo}: ` +
-          `${descripcionReglaAhorro(
-            reglaAhorro.Modo,
-            reglaAhorro.Valor
-          )}.`;
-
-        texto +=
-          `\nDe este ingreso se separarían ` +
-          `${formatearDinero(
-            ahorroCalculado
-          )}.`;
-      }
+      texto +=
+        `\n\n🏦 *Ahorro*\n` +
+        `Sin ahorro para ${tipo}.`;
 
     } else {
       texto +=
-        `\n\nActualmente no tienes una regla de ahorro para ${tipo}.`;
-
-      texto +=
-        ` Después de guardar te preguntaré si quieres crear una.`;
+        `\n\n🏦 *Ahorro*\n` +
+        `No hay regla para ${tipo}. Después de guardar puedes crear una.`;
     }
   }
 
@@ -2501,7 +1997,7 @@ async function prepararConfirmacionRegistro(
     );
 
   texto +=
-    "\n\n¿Está correcto? Responde sí o no.";
+    "\n\n¿Está correcto?\n✅ Sí\n✏️ No, corregir";
 
   return texto;
 }
@@ -2512,8 +2008,9 @@ async function guardarAhorroDeIngreso(
   nota
 ) {
   if (
-    valorNumero(monto) <=
-    0
+    valorNumero(
+      monto
+    ) <= 0
   ) {
     return null;
   }
@@ -2555,10 +2052,26 @@ async function procesarRegistroConfirmacion(
   remitente,
   sesion
 ) {
-  if (
-    respuestaNo(
+  const t =
+    normalizar(
       textoUsuario
-    )
+    );
+
+  if (
+    t === "cancelar" ||
+    t === "cancela"
+  ) {
+    sesiones.delete(
+      remitente
+    );
+
+    return (
+      "Operación cancelada."
+    );
+  }
+
+  if (
+    t === "no"
   ) {
     guardarSesion(
       remitente,
@@ -2577,10 +2090,11 @@ async function procesarRegistroConfirmacion(
       }
     );
 
-    return (
-      "De acuerdo. Dime qué dato quieres corregir. " +
-      'Por ejemplo: "el monto es 350" o "la fecha es mañana".'
-    );
+    return [
+      "✏️ *Vamos a corregir el registro*",
+      "Dime qué dato cambia.",
+      'Ej.: “monto 350” o “fecha mañana”.'
+    ].join("\n");
   }
 
   if (
@@ -2589,8 +2103,7 @@ async function procesarRegistroConfirmacion(
     )
   ) {
     return (
-      "Necesito tu confirmación. " +
-      "Responde sí si está correcto o no si quieres cambiar algo."
+      "Responde *sí* para guardar, *no* para corregir o *cancelar*."
     );
   }
 
@@ -2609,18 +2122,13 @@ async function procesarRegistroConfirmacion(
     );
 
     return (
-      `Listo. Guardé el registro con ID ${resultado.id}.`
+      `✅ Listo. Guardé el registro con ID *${resultado.id}*.`
     );
   }
 
   if (
     sesion.reglaAhorro
   ) {
-    const modo =
-      normalizar(
-        sesion.reglaAhorro.Modo
-      );
-
     const ahorro =
       Number(
         sesion.ahorroCalculado ||
@@ -2628,7 +2136,9 @@ async function procesarRegistroConfirmacion(
       );
 
     if (
-      modo !==
+      normalizar(
+        sesion.reglaAhorro.Modo
+      ) !==
         "apagado" &&
       ahorro > 0
     ) {
@@ -2646,10 +2156,10 @@ async function procesarRegistroConfirmacion(
       );
 
       return (
-        `Listo. Guardé el ingreso con ID ${resultado.id}.` +
-        `\nTambién separé ${formatearDinero(
+        `✅ Ingreso guardado: *${resultado.id}*\n` +
+        `🏦 Ahorro separado: *${formatearDinero(
           ahorro
-        )} como ahorro.`
+        )}*`
       );
     }
 
@@ -2658,8 +2168,8 @@ async function procesarRegistroConfirmacion(
     );
 
     return (
-      `Listo. Guardé el ingreso con ID ${resultado.id}. ` +
-      "La regla actual indica que no se haga ahorro."
+      `✅ Ingreso guardado: *${resultado.id}*\n` +
+      "🏦 La regla actual indica sin ahorro."
     );
   }
 
@@ -2677,16 +2187,13 @@ async function procesarRegistroConfirmacion(
     }
   );
 
-  return (
-    `Listo. Guardé el ingreso con ID ${resultado.id}.\n\n` +
-    `No tienes una regla de ahorro para ${
-      sesion.data[
-        "Tipo de ingreso"
-      ]
-    }.\n` +
-    "¿Quieres crear una ahora?\n\n" +
-    'Puedes responder, por ejemplo, "10%", "2000 pesos" o "no".'
-  );
+  return [
+    `✅ Ingreso guardado: *${resultado.id}*`,
+    "",
+    `🏦 No tienes regla de ahorro para *${sesion.data["Tipo de ingreso"]}*.`,
+    "¿Quieres crear una?",
+    'Ej.: “10%”, “2000 pesos” o “no”.'
+  ].join("\n");
 }
 
 async function procesarCorreccionRegistro(
@@ -2695,13 +2202,10 @@ async function procesarCorreccionRegistro(
   sesion
 ) {
   if (
-    respuestaNo(
-      textoUsuario
-    ) ||
     normalizar(
       textoUsuario
     ) ===
-      "cancelar"
+    "cancelar"
   ) {
     sesiones.delete(
       remitente
@@ -2743,7 +2247,7 @@ async function procesarCorreccionRegistro(
       combinarDatos(
         sesion.data,
         interpretacion.data ||
-          {}
+        {}
       ),
       sesion.mensajeOriginal
     );
@@ -2765,7 +2269,7 @@ async function procesarRegistroPendiente(
     normalizar(
       textoUsuario
     ) ===
-      "cancelar"
+    "cancelar"
   ) {
     sesiones.delete(
       remitente
@@ -2801,7 +2305,7 @@ async function procesarRegistroPendiente(
       combinarDatos(
         sesion.data,
         interpretacion.data ||
-          {}
+        {}
       ),
       sesion.mensajeOriginal ||
       textoUsuario
@@ -2845,7 +2349,6 @@ async function procesarRegistroPendiente(
     sesion.mensajeOriginal
   );
 }
-
 async function procesarAhorroSinRegla(
   textoUsuario,
   remitente,
@@ -2861,7 +2364,7 @@ async function procesarAhorroSinRegla(
     );
 
     return (
-      "Perfecto. Este ingreso queda sin ahorro."
+      "✅ Entendido. Este ingreso queda sin ahorro."
     );
   }
 
@@ -2870,13 +2373,12 @@ async function procesarAhorroSinRegla(
       textoUsuario
     );
 
-  if (
-    !reglaRapida
-  ) {
-    return (
-      "No alcancé a identificar el ahorro. " +
-      'Puedes decir "10%", "1500 pesos" o "no".'
-    );
+  if (!reglaRapida) {
+    return [
+      "🏦 *¿Cuánto quieres ahorrar?*",
+      'Ej.: “10%” o “1500 pesos”.',
+      'Si no quieres ahorrar, responde “no”.'
+    ].join("\n");
   }
 
   const alcance =
@@ -2884,9 +2386,7 @@ async function procesarAhorroSinRegla(
       textoUsuario
     );
 
-  if (
-    !alcance
-  ) {
+  if (!alcance) {
     guardarSesion(
       remitente,
       {
@@ -2904,13 +2404,17 @@ async function procesarAhorroSinRegla(
       }
     );
 
-    return (
-      `Entendí ${descripcionReglaAhorro(
+    return [
+      `🏦 Ahorro: *${descripcionReglaAhorro(
         reglaRapida.modo,
         reglaRapida.valor
-      )}.\n\n` +
-      "¿Quieres usarlo solo esta vez, solo este mes o de ahora en adelante?"
-    );
+      )}*`,
+      "",
+      "¿Durante cuánto tiempo?",
+      "1. Solo esta vez",
+      "2. Solo este mes",
+      "3. De ahora en adelante"
+    ].join("\n");
   }
 
   return aplicarAhorroNuevo(
@@ -2926,17 +2430,40 @@ async function procesarAhorroAlcance(
   remitente,
   sesion
 ) {
-  const alcance =
+  let alcance =
     detectarAlcance(
       textoUsuario
     );
 
-  if (
-    !alcance
-  ) {
-    return (
-      'Respóndeme "solo esta vez", "este mes" o "de ahora en adelante".'
+  const t =
+    normalizar(
+      textoUsuario
     );
+
+  if (!alcance) {
+    if (t === "1") {
+      alcance =
+        "una_vez";
+    }
+
+    if (t === "2") {
+      alcance =
+        "este_mes";
+    }
+
+    if (t === "3") {
+      alcance =
+        "permanente";
+    }
+  }
+
+  if (!alcance) {
+    return [
+      "Elige una opción:",
+      "1. Solo esta vez",
+      "2. Solo este mes",
+      "3. De ahora en adelante"
+    ].join("\n");
   }
 
   return aplicarAhorroNuevo(
@@ -2960,15 +2487,13 @@ async function aplicarAhorroNuevo(
       regla.valor
     );
 
-  if (
-    monto <= 0
-  ) {
+  if (monto <= 0) {
     sesiones.delete(
       remitente
     );
 
     return (
-      "El ahorro calculado es $0.00, así que no hice ningún movimiento."
+      "El ahorro calculado es $0.00. No hice ningún movimiento."
     );
   }
 
@@ -3016,65 +2541,55 @@ async function aplicarAhorroNuevo(
     remitente
   );
 
-  let texto =
-    `Perfecto. Separé ${formatearDinero(
+  const alcanceTexto =
+    alcance ===
+      "una_vez"
+      ? "Solo esta vez"
+      : alcance ===
+          "este_mes"
+        ? "Durante este mes"
+        : "De ahora en adelante";
+
+  return [
+    "✅ *Ahorro registrado*",
+    SEPARADOR,
+    `Monto: *${formatearDinero(
       monto
-    )} de este ingreso.`;
-
-  if (
-    alcance ===
-    "este_mes"
-  ) {
-    texto +=
-      "\nLa misma regla se usará durante este mes.";
-
-  } else if (
-    alcance ===
-    "permanente"
-  ) {
-    texto +=
-      "\nLa dejé como regla de ahora en adelante.";
-
-  } else {
-    texto +=
-      "\nLa regla fue solo para esta vez.";
-  }
-
-  return texto;
+    )}*`,
+    `Regla: ${descripcionReglaAhorro(
+      regla.modo,
+      regla.valor
+    )}`,
+    `Alcance: ${alcanceTexto}`
+  ].join("\n");
 }
 
 function construirResumenConfiguracion(
   datos
 ) {
-  const modo =
-    datos.modo;
-
-  if (
+  const apagado =
     normalizar(
-      modo
+      datos.modo
     ) ===
-      "apagado"
-  ) {
-    return (
-      `Tipo de ingreso: ${datos.tipoIngreso}\n` +
-      "Ahorro: apagado\n" +
-      `Alcance: ${datos.alcance}`
-    );
-  }
+    "apagado";
 
-  return (
-    `Tipo de ingreso: ${datos.tipoIngreso}\n` +
-    `Ahorro: ${descripcionReglaAhorro(
-      modo,
-      datos.valor
-    )}\n` +
+  return [
+    "🏦 *Regla de ahorro*",
+    SEPARADOR,
+    `Ingreso: ${datos.tipoIngreso}`,
+    apagado
+      ? "Ahorro: Apagado"
+      : `Ahorro: ${descripcionReglaAhorro(
+          datos.modo,
+          datos.valor
+        )}`,
     `Alcance: ${
       datos.alcance ===
       "este_mes"
-        ? "solo este mes"
-        : "de ahora en adelante"
+        ? "Solo este mes"
+        : "De ahora en adelante"
     }`
-  );
+  ].join("\n");
 }
 
 async function iniciarConfiguracionAhorro(
@@ -3098,13 +2613,11 @@ async function iniciarConfiguracionAhorro(
     interpretacion.alcance ||
     "permanente";
 
-  if (
-    !tipoIngreso
-  ) {
-    return (
-      "¿Para qué tipo de ingreso quieres definir el ahorro? " +
-      "Por ejemplo: sueldo, bono o vales."
-    );
+  if (!tipoIngreso) {
+    return [
+      "🏦 *¿Para qué ingreso?*",
+      "Ej.: sueldo, bono o vales."
+    ].join("\n");
   }
 
   if (
@@ -3116,9 +2629,25 @@ async function iniciarConfiguracionAhorro(
       normalizar(modo)
     )
   ) {
-    return (
-      "Dime si quieres ahorrar un porcentaje, un monto fijo o apagar el ahorro."
-    );
+    return [
+      "🏦 *¿Cómo quieres ahorrar?*",
+      "• Porcentaje",
+      "• Monto fijo",
+      "• Apagar ahorro"
+    ].join("\n");
+  }
+
+  if (
+    normalizar(modo) !==
+      "apagado" &&
+    estaVacio(
+      interpretacion.valor
+    )
+  ) {
+    return [
+      "🏦 *¿Cuánto quieres ahorrar?*",
+      'Ej.: “10%” o “2000 pesos”.'
+    ].join("\n");
   }
 
   if (
@@ -3126,21 +2655,17 @@ async function iniciarConfiguracionAhorro(
     "una_vez"
   ) {
     return (
-      "Si quieres ahorrar solo una vez, hazlo cuando registremos ese ingreso. " +
-      "Así sabré exactamente a qué ingreso aplicarlo."
+      "Para ahorrar solo una vez, indícalo cuando registremos ese ingreso."
     );
   }
 
   const datos = {
     tipoIngreso,
-
     modo,
 
     valor:
-      normalizar(
-        modo
-      ) ===
-      "apagado"
+      normalizar(modo) ===
+        "apagado"
         ? 0
         : interpretacion.valor,
 
@@ -3160,13 +2685,17 @@ async function iniciarConfiguracionAhorro(
     }
   );
 
-  return (
-    "Voy a dejar la regla así:\n\n" +
+  return [
+    "✅ *Revisa antes de guardar*",
+    "",
     construirResumenConfiguracion(
       datos
-    ) +
-    "\n\n¿Está correcto? Responde sí o no."
-  );
+    ),
+    "",
+    "¿Está correcto?",
+    "✅ Sí",
+    "❌ No"
+  ].join("\n");
 }
 
 async function procesarConfigAhorroConfirmacion(
@@ -3194,7 +2723,7 @@ async function procesarConfigAhorroConfirmacion(
     )
   ) {
     return (
-      "Responde sí para guardar la regla o no para cancelar."
+      "Responde *sí* para guardar o *no* para cancelar."
     );
   }
 
@@ -3209,7 +2738,7 @@ async function procesarConfigAhorroConfirmacion(
   );
 
   return (
-    "Listo. La nueva regla de ahorro quedó guardada."
+    "✅ Regla de ahorro guardada."
   );
 }
 
@@ -3229,9 +2758,14 @@ async function iniciarMetaAhorro(
       interpretacion.fechaObjetivo
     )
   ) {
-    return (
-      "Para crear la meta necesito saber qué quieres ahorrar, cuánto quieres juntar y para qué fecha."
-    );
+    return [
+      "🎯 *Para crear una meta necesito:*",
+      "• Qué quieres lograr",
+      "• Cuánto quieres juntar",
+      "• Para qué fecha",
+      "",
+      'Ej.: “Quiero juntar 10,000 para vacaciones en diciembre”.'
+    ].join("\n");
   }
 
   const datos = {
@@ -3265,21 +2799,25 @@ async function iniciarMetaAhorro(
     }
   );
 
-  return (
-    "Voy a crear esta meta:\n\n" +
-    `Meta: ${datos.Meta}\n` +
+  return [
+    "🎯 *Nueva meta*",
+    SEPARADOR,
+    `Meta: ${datos.Meta}`,
     `Objetivo: ${formatearDinero(
       datos[
         "Monto objetivo"
       ]
-    )}\n` +
+    )}`,
     `Fecha: ${
       datos[
         "Fecha objetivo"
       ]
-    }\n\n` +
-    "¿Está correcto? Responde sí o no."
-  );
+    }`,
+    "",
+    "¿Está correcto?",
+    "✅ Sí",
+    "❌ No"
+  ].join("\n");
 }
 
 async function procesarMetaConfirmacion(
@@ -3307,7 +2845,7 @@ async function procesarMetaConfirmacion(
     )
   ) {
     return (
-      "Responde sí para crear la meta o no para cancelar."
+      "Responde *sí* para crear la meta o *no* para cancelar."
     );
   }
 
@@ -3321,7 +2859,7 @@ async function procesarMetaConfirmacion(
   );
 
   return (
-    `Listo. Creé la meta con ID ${resultado.id}.`
+    `✅ Meta creada con ID *${resultado.id}*.`
   );
 }
 
@@ -3329,48 +2867,63 @@ function formatearMetas(
   metas
 ) {
   if (
-    !metas ||
-    metas.length ===
-      0
+    !Array.isArray(
+      metas
+    ) ||
+    metas.length === 0
   ) {
     return (
-      "Todavía no tienes metas de ahorro."
+      "🎯 Todavía no tienes metas de ahorro."
     );
   }
 
-  return metas
-    .map(
-      meta => {
-        return [
-          `🎯 ${meta.Meta}`,
-          `Meta: ${formatearDinero(
-            meta[
-              "Monto objetivo"
-            ]
-          )}`,
-          `Llevas: ${formatearDinero(
-            meta[
-              "Ahorro acumulado"
-            ]
-          )}`,
-          `Avance: ${
-            meta[
-              "Avance %"
-            ]
-          }%`,
-          `Falta: ${formatearDinero(
-            meta.Falta
-          )}`,
-          `Fecha objetivo: ${
-            meta[
-              "Fecha objetivo"
-            ] ||
-            "Sin fecha"
-          }`
-        ].join("\n");
-      }
-    )
-    .join("\n\n");
+  return [
+    "🎯 *Mis metas de ahorro*",
+    "",
+    metas
+      .map(
+        (
+          meta,
+          i
+        ) => {
+          const avance =
+            estaVacio(
+              meta["Avance %"]
+            )
+              ? "0"
+              : meta[
+                  "Avance %"
+                ];
+
+          return [
+            `${i + 1}. *${meta.Meta}*`,
+            `Meta: ${formatearDinero(
+              meta[
+                "Monto objetivo"
+              ]
+            )}`,
+            `Ahorrado: ${formatearDinero(
+              meta[
+                "Ahorro acumulado"
+              ]
+            )}`,
+            `Avance: ${avance}%`,
+            `Falta: ${formatearDinero(
+              meta.Falta
+            )}`,
+            `Fecha: ${
+              meta[
+                "Fecha objetivo"
+              ] ||
+              "Sin fecha"
+            }`
+          ].join("\n");
+        }
+      )
+      .join(
+        `\n\n${SEPARADOR}\n\n`
+      )
+  ].join("\n");
 }
 
 function formatearHistorial(
@@ -3385,64 +2938,81 @@ function formatearHistorial(
     0
   ) {
     return (
-      `No encontré compras de "${resultado.producto}" ` +
+      `No encontré compras de *${resultado.producto}* ` +
       `en los últimos ${resultado.meses} meses.`
     );
   }
 
   const lineas =
     registros.map(
-      r => {
-        let texto =
-          `${r[
-            "Fecha de compra"
-          ]} — ` +
-          `${r.Tienda ||
-            "Tienda no indicada"} — ` +
-          `${formatearDinero(
-            r.Monto
-          )}`;
+      (
+        r,
+        i
+      ) => {
+        const unidad =
+          r[
+            "Unidad de comparación"
+          ] ||
+          r.Unidad ||
+          "unidad";
 
-        if (
+        const precio =
           !estaVacio(
             r[
               "Precio por unidad"
             ]
           )
-        ) {
-          texto +=
-            ` — ${formatearDinero(
-              r[
-                "Precio por unidad"
-              ]
-            )} por ${
-              r.Unidad ||
-              "unidad"
-            }`;
-        }
+            ? `\nPrecio por ${unidad}: ${formatearDinero(
+                r[
+                  "Precio por unidad"
+                ]
+              )}`
+            : "";
 
-        return texto;
+        return [
+          `${i + 1}. *${r.Producto || resultado.producto}*`,
+          `Fecha: ${
+            r[
+              "Fecha de compra"
+            ] ||
+            "—"
+          }`,
+          `Tienda: ${
+            r.Tienda ||
+            "—"
+          }`,
+          `Monto: ${formatearDinero(
+            r.Monto
+          )}${precio}`
+        ].join("\n");
       }
     );
 
-  return (
-    `Historial de ${resultado.producto} ` +
-    `— últimos ${resultado.meses} meses:\n\n` +
-    lineas.join("\n")
-  );
+  return [
+    `📈 *Historial · ${resultado.producto}*`,
+    `Últimos ${resultado.meses} meses`,
+    "",
+    lineas.join(
+      `\n\n${SEPARADOR}\n\n`
+    )
+  ].join("\n");
 }
 
 function formatearReporte(
   reporte
 ) {
   return [
-    `📊 Reporte — ${reporte.Mes}`,
+    `📊 *Reporte · ${reporte.Mes}*`,
+    SEPARADOR,
     "",
+    "💰 *Entradas*",
     `Ingresos: ${formatearDinero(
       reporte[
         "Total de ingresos"
       ]
     )}`,
+    "",
+    "💸 *Salidas*",
     `Pagos: ${formatearDinero(
       reporte[
         "Total pagos"
@@ -3463,26 +3033,30 @@ function formatearReporte(
         "Gastos totales"
       ]
     )}`,
-    `Saldo: ${formatearDinero(
-      reporte[
-        "Saldo final"
-      ]
-    )}`,
-    `Pagos pendientes: ${formatearDinero(
-      reporte[
-        "Pagos pendientes"
-      ]
-    )}`,
+    "",
+    "🏦 *Ahorro*",
     `Ahorro realizado: ${formatearDinero(
       reporte[
         "Ahorro realizado"
       ]
     )}`,
-    `Dinero libre: ${formatearDinero(
+    "",
+    "📌 *Situación actual*",
+    `Pagos pendientes: ${formatearDinero(
+      reporte[
+        "Pagos pendientes"
+      ]
+    )}`,
+    `Saldo: ${formatearDinero(
+      reporte[
+        "Saldo final"
+      ]
+    )}`,
+    `Dinero libre: *${formatearDinero(
       reporte[
         "Dinero libre"
       ]
-    )}`
+    )}*`
   ].join("\n");
 }
 
@@ -3504,7 +3078,7 @@ async function procesarReporte(
     0
   ) {
     return (
-      `No encontré información para ${mes}.`
+      `📊 No encontré información para *${mes}*.`
     );
   }
 
@@ -3513,19 +3087,19 @@ async function procesarReporte(
       .map(
         formatearReporte
       )
-      .join("\n\n");
+      .join(
+        "\n\n"
+      );
 
   if (
     quiereGrafica
   ) {
     texto +=
-      "\n\nLa información visual se generará con estos mismos datos. " +
-      "Si la gráfica no está disponible, este resumen siempre seguirá funcionando.";
+      "\n\n📈 El reporte usa estos mismos datos para la vista gráfica.";
   }
 
   return texto;
 }
-
 async function iniciarEliminacion(
   sheet,
   buscar,
@@ -3546,9 +3120,7 @@ async function iniciarEliminacion(
     0
   ) {
     return (
-      `No encontré ningún registro que coincida con "${buscar}" en ${tituloHoja(
-        sheet
-      )}.`
+      `🔎 No encontré registros que coincidan con *${buscar}* en ${tituloHoja(sheet)}.`
     );
   }
 
@@ -3571,14 +3143,18 @@ async function iniciarEliminacion(
       }
     );
 
-    return (
-      "Encontré este registro:\n\n" +
-      formatearRegistro(
+    return [
+      "🗑️ *Encontré este registro*",
+      "",
+      resumenRegistroVisual(
         sheet,
         seleccion.data
-      ) +
-      "\n\n¿Quieres eliminarlo? Responde sí o no."
-    );
+      ),
+      "",
+      "¿Quieres eliminarlo?",
+      "✅ Sí",
+      "❌ No"
+    ].join("\n");
   }
 
   guardarSesion(
@@ -3600,21 +3176,26 @@ async function iniciarEliminacion(
           item,
           indice
         ) =>
-          `${indice + 1}.\n` +
-          formatearRegistro(
-            sheet,
-            item.data
-          )
+          [
+            `*${indice + 1}.*`,
+            formatearRegistro(
+              sheet,
+              item.data
+            )
+          ].join("\n")
       )
       .join(
-        "\n\n"
+        `\n\n${SEPARADOR}\n\n`
       );
 
-  return (
-    `Encontré ${coincidencias.length} registros:\n\n` +
-    lista +
-    "\n\n¿Cuál quieres eliminar? Responde con el número."
-  );
+  return [
+    `🔎 Encontré *${coincidencias.length} registros*`,
+    "",
+    lista,
+    "",
+    "¿Cuál quieres eliminar?",
+    "Responde con el número."
+  ].join("\n");
 }
 
 async function procesarEliminacionPendiente(
@@ -3651,8 +3232,7 @@ async function procesarEliminacionPendiente(
       !coincidencia
     ) {
       return (
-        `Dime el número del registro que quieres eliminar, ` +
-        `del 1 al ${sesion.coincidencias.length}.`
+        `Escribe un número del 1 al ${sesion.coincidencias.length}.`
       );
     }
 
@@ -3689,14 +3269,18 @@ async function procesarEliminacionPendiente(
       }
     );
 
-    return (
-      "Voy a eliminar este registro:\n\n" +
-      formatearRegistro(
+    return [
+      "🗑️ *Voy a eliminar este registro*",
+      "",
+      resumenRegistroVisual(
         sesion.sheet,
         seleccion.data
-      ) +
-      "\n\n¿Confirmas? Responde sí o no."
-    );
+      ),
+      "",
+      "¿Confirmas?",
+      "✅ Sí",
+      "❌ No"
+    ].join("\n");
   }
 
   if (
@@ -3723,7 +3307,7 @@ async function procesarEliminacionPendiente(
       )
     ) {
       return (
-        "Necesito tu confirmación. Responde sí para eliminarlo o no para cancelar."
+        "Responde *sí* para eliminar o *no* para cancelar."
       );
     }
 
@@ -3737,13 +3321,14 @@ async function procesarEliminacionPendiente(
       remitente
     );
 
-    return (
-      "Listo. Marqué como eliminado este registro:\n\n" +
-      formatearRegistro(
+    return [
+      "✅ *Registro eliminado*",
+      "",
+      resumenRegistroVisual(
         sesion.sheet,
         resultado.eliminado
       )
-    );
+    ].join("\n");
   }
 
   sesiones.delete(
@@ -3751,7 +3336,7 @@ async function procesarEliminacionPendiente(
   );
 
   return (
-    "La operación fue cancelada."
+    "Operación cancelada."
   );
 }
 
@@ -3814,408 +3399,519 @@ function limpiarItemTicket(
 
     Notas:
       "",
-"Registro de mensaje enviado":
-  "Foto de ticket recibida por WhatsApp"
-};
 
-return completarDatosCalculados(
-  "Super",
-  data,
-  "Foto de ticket recibida por WhatsApp"
-);
-}
+    "Registro de mensaje enviado":
+      "Foto de ticket recibida por WhatsApp"
+  };
 
-async function procesarImagenRecibida(
-  mensaje,
-  remitente
-) {
-  const mediaId =
-    mensaje.image?.id;
-
-  if (!mediaId) {
-    return (
-      "No pude identificar la imagen."
-    );
-  }
-
-  const media =
-    await obtenerMediaWhatsApp(
-      mediaId
-    );
-
-  const analisis =
-    await interpretarImagen(
-      media.buffer,
-      media.mimeType
-    );
-
-  if (
-    analisis.accion ===
-    "ticket_pago"
-  ) {
-    const data =
-      completarDatosCalculados(
-        "Pagos",
-        analisis.data ||
-          {},
-        "Foto de recibo recibida por WhatsApp"
-      );
-
-    return prepararConfirmacionRegistro(
-      remitente,
-      "Pagos",
-      data,
-      "Foto de recibo recibida por WhatsApp"
-    );
-  }
-
-  if (
-    analisis.accion ===
-    "ticket_super"
-  ) {
-    const items =
-      Array.isArray(
-        analisis.items
-      )
-        ? analisis.items
-        : [];
-
-    const registros =
-      items
-        .filter(
-          item =>
-            !estaVacio(
-              item.Producto
-            ) &&
-            !estaVacio(
-              item.Monto
-            )
-        )
-        .map(
-          item =>
-            limpiarItemTicket(
-              item,
-              analisis
-            )
-        );
-
-    if (
-      registros.length ===
-      0
-    ) {
-      return (
-        "Pude ver el ticket, pero no pude leer con suficiente seguridad los productos y sus precios. " +
-        "Puedes mandarme una foto más clara o dictarme los datos."
-      );
-    }
-
-    if (
-      registros.some(
-        r =>
-          estaVacio(
-            r[
-              "Fecha de compra"
-            ]
-          )
-      )
-    ) {
-      guardarSesion(
-        remitente,
-        {
-          tipo:
-            "ticket_super_fecha",
-
-          registros
-        }
-      );
-
-      return (
-        `Pude leer ${registros.length} producto(s), pero no alcanzo a ver bien la fecha.\n` +
-        "¿Qué fecha le pongo?"
-      );
-    }
-
-    if (
-      registros.some(
-        r =>
-          estaVacio(
-            r.Tienda
-          )
-      )
-    ) {
-      guardarSesion(
-        remitente,
-        {
-          tipo:
-            "ticket_super_tienda",
-
-          registros
-        }
-      );
-
-      return (
-        `Pude leer ${registros.length} producto(s), pero no alcanzo a identificar bien la tienda.\n` +
-        "¿En qué tienda fue?"
-      );
-    }
-
-    guardarSesion(
-      remitente,
-      {
-        tipo:
-          "ticket_super_confirmacion",
-
-        registros
-      }
-    );
-
-    return (
-      "Del ticket voy a registrar esto:\n\n" +
-      resumenTicketSuper(
-        registros
-      ) +
-      "\n\n¿Está correcto? Responde sí o no."
-    );
-  }
-
-  return (
-    `No pude identificar con seguridad si la imagen es un ticket del súper o un recibo de pago.` +
-    `${
-      analisis.descripcion
-        ? `\n\nAlcancé a ver: ${analisis.descripcion}`
-        : ""
-    }\n\n` +
-    "Dime si quieres registrarlo en Súper o en Pagos."
+  return completarDatosCalculados(
+    "Super",
+    data,
+    "Foto de ticket recibida por WhatsApp"
   );
 }
 
-function valorTicket(valor, tipo = "texto") {
-  if (estaVacio(valor)) return "—";
-  if (tipo === "dinero") return formatearDinero(valor);
-  return String(valor);
-}
-
-function resumenTicketSuper(registros) {
-  if (!Array.isArray(registros) || registros.length === 0) {
-    return "No hay productos para mostrar.";
+function valorTicket(
+  valor,
+  tipo = "texto"
+) {
+  if (
+    estaVacio(
+      valor
+    )
+  ) {
+    return "⚠️ Falta";
   }
 
-  const primero = registros[0] || {};
+  if (
+    tipo ===
+    "dinero"
+  ) {
+    return formatearDinero(
+      valor
+    );
+  }
 
-  const cabecera = [
-    `Fecha de compra: ${valorTicket(primero["Fecha de compra"])}`,
-    `Tienda: ${valorTicket(primero.Tienda)}`
-  ].join("\n");
-
-  const productos = registros
-    .map((r, i) =>
-      [
-        `Producto ${i + 1}`,
-        `Producto: ${valorTicket(r.Producto)}`,
-        `Producto base: ${valorTicket(r["Producto base"])}`,
-        `Categoría: ${valorTicket(r.Categoría)}`,
-        `Monto total: ${valorTicket(r.Monto, "dinero")}`,
-        `Cantidad comprada: ${valorTicket(r.Cantidad)}`,
-        `Unidad de compra: ${valorTicket(r.Unidad)}`,
-        `Contenido por empaque: ${valorTicket(r["Contenido por empaque"])}`,
-        `Unidad de comparación: ${valorTicket(r["Unidad de comparación"])}`,
-        `Precio por unidad de comparación: ${
-          estaVacio(r["Precio por unidad"])
-            ? "—"
-            : formatearDinero(r["Precio por unidad"])
-        }`
-      ].join("\n")
-    )
-    .join("\n\n");
-
-  return `${cabecera}\n\n${productos}`;
+  return String(
+    valor
+  );
 }
 
-const CAMPOS_CORRECCION_TICKET = [
-  "Fecha de compra",
-  "Producto",
-  "Producto base",
-  "Categoría",
-  "Monto",
-  "Tienda",
-  "Cantidad",
-  "Unidad",
-  "Contenido por empaque",
-  "Unidad de comparación",
-  "Precio por unidad"
-];
+function resumenTicketSuper(
+  registros
+) {
+  if (
+    !Array.isArray(
+      registros
+    ) ||
+    registros.length ===
+      0
+  ) {
+    return (
+      "No hay productos para mostrar."
+    );
+  }
 
-function camposConDatosTicket(registros) {
-  return CAMPOS_CORRECCION_TICKET.filter(campo =>
-    registros.some(r => !estaVacio(r[campo]))
+  const primero =
+    registros[0] ||
+    {};
+
+  const cabecera = [
+    "🧾 *Datos generales*",
+    `Fecha de compra: ${valorTicket(
+      primero[
+        "Fecha de compra"
+      ]
+    )}`,
+    `Tienda: ${valorTicket(
+      primero.Tienda
+    )}`
+  ].join("\n");
+
+  const productos =
+    registros
+      .map(
+        (
+          r,
+          i
+        ) => {
+          const unidadComparacion =
+            valorTicket(
+              r[
+                "Unidad de comparación"
+              ]
+            );
+
+          return [
+            `📦 *Producto ${i + 1}*`,
+            `Producto: ${valorTicket(
+              r.Producto
+            )}`,
+            `Producto base: ${valorTicket(
+              r[
+                "Producto base"
+              ]
+            )}`,
+            `Categoría: ${valorTicket(
+              r.Categoría
+            )}`,
+            `Monto: ${valorTicket(
+              r.Monto,
+              "dinero"
+            )}`,
+            `Cantidad: ${valorTicket(
+              r.Cantidad
+            )}`,
+            `Unidad: ${valorTicket(
+              r.Unidad
+            )}`,
+            `Contenido por empaque: ${valorTicket(
+              r[
+                "Contenido por empaque"
+              ]
+            )}`,
+            `Unidad de comparación: ${unidadComparacion}`,
+            `Precio por unidad: ${
+              estaVacio(
+                r[
+                  "Precio por unidad"
+                ]
+              )
+                ? "⚠️ Falta"
+                : formatearDinero(
+                    r[
+                      "Precio por unidad"
+                    ]
+                  )
+            }`
+          ].join("\n");
+        }
+      )
+      .join(
+        `\n\n${SEPARADOR}\n\n`
+      );
+
+  return [
+    cabecera,
+    "",
+    SEPARADOR,
+    "",
+    productos
+  ].join("\n");
+}
+
+function camposConDatosTicket(
+  registros
+) {
+  return CAMPOS_CORRECCION_TICKET.filter(
+    campo =>
+      registros.some(
+        r =>
+          !estaVacio(
+            r[campo]
+          )
+      )
+  );
+}
+
+function etiquetaCampoTicket(
+  campo
+) {
+  if (
+    campo ===
+    "Monto"
+  ) {
+    return (
+      "Monto"
+    );
+  }
+
+  return campo;
+}
+
+function etiquetaCampoCorta(
+  campo
+) {
+  const mapa = {
+    "Fecha de compra":
+      "Fecha de compra",
+
+    Producto:
+      "Producto (marca o presentación)",
+
+    "Producto base":
+      "Producto base (tipo general)",
+
+    Categoría:
+      "Categoría (grupo del gasto)",
+
+    Monto:
+      "Monto (total pagado)",
+
+    Tienda:
+      "Tienda",
+
+    Cantidad:
+      "Cantidad (empaques comprados)",
+
+    Unidad:
+      "Unidad (tipo de empaque)",
+
+    "Contenido por empaque":
+      "Contenido por empaque",
+
+    "Unidad de comparación":
+      "Unidad de comparación",
+
+    "Precio por unidad":
+      "Precio por unidad"
+  };
+
+  return (
+    mapa[campo] ||
+    campo
   );
 }
 
 function menuCorreccionTicket() {
   return [
-    "¿Qué quieres corregir?",
+    "✏️ *¿Qué quieres corregir?*",
     "",
     "1. Fecha de compra",
-    "2. Producto",
-    "3. Producto base",
-    "4. Categoría",
-    "5. Precio / Monto",
+    "2. Producto (marca o presentación)",
+    "3. Producto base (tipo general)",
+    "4. Categoría (grupo del gasto)",
+    "5. Monto (total pagado)",
     "6. Tienda",
-    "7. Cantidad",
-    "8. Unidad",
+    "7. Cantidad (empaques)",
+    "8. Unidad (paquete, caja, botella…)",
     "9. Contenido por empaque",
     "10. Unidad de comparación",
     "11. Precio por unidad",
     "",
-    "Puedes responder, por ejemplo:",
-    '• "2 y 4"',
-    '• "producto y categoría"',
-    '• "contenido por empaque y unidad de comparación"',
-    '• "solo precio y tienda están bien"',
-    '• "cancelar"'
+    "Puedes responder:",
+    '• “2 y 4”',
+    '• “producto y categoría”',
+    '• “monto y tienda”',
+    '• “solo monto está mal”',
+    '• “cancelar”'
   ].join("\n");
 }
 
-function detectarCamposTicket(texto) {
-  const t = normalizar(texto);
+function detectarCamposTicket(
+  texto
+) {
+  const t =
+    normalizar(
+      texto
+    );
 
   if (
-    t.includes("cancelar") ||
-    t.includes("cancela")
+    t.includes(
+      "cancelar"
+    ) ||
+    t.includes(
+      "cancela"
+    )
   ) {
     return {
-      accion: "cancelar",
-      campos: []
+      accion:
+        "cancelar",
+
+      campos:
+        []
     };
   }
 
   if (
-    t.includes("todo bien") ||
-    t.includes("ya esta bien")
+    t.includes(
+      "todo bien"
+    ) ||
+    t.includes(
+      "ya esta bien"
+    )
   ) {
     return {
-      accion: "confirmar",
-      campos: []
+      accion:
+        "confirmar",
+
+      campos:
+        []
     };
   }
 
-  const campos = new Set();
+  const campos =
+    new Set();
 
   const numeroACampo = {
-    1: "Fecha de compra",
-    2: "Producto",
-    3: "Producto base",
-    4: "Categoría",
-    5: "Monto",
-    6: "Tienda",
-    7: "Cantidad",
-    8: "Unidad",
-    9: "Contenido por empaque",
-    10: "Unidad de comparación",
-    11: "Precio por unidad"
+    1:
+      "Fecha de compra",
+
+    2:
+      "Producto",
+
+    3:
+      "Producto base",
+
+    4:
+      "Categoría",
+
+    5:
+      "Monto",
+
+    6:
+      "Tienda",
+
+    7:
+      "Cantidad",
+
+    8:
+      "Unidad",
+
+    9:
+      "Contenido por empaque",
+
+    10:
+      "Unidad de comparación",
+
+    11:
+      "Precio por unidad"
   };
 
   const numeros =
-    t.match(/\b(?:10|11|[1-9])\b/g) || [];
+    t.match(
+      /\b(?:11|10|[1-9])\b/g
+    ) ||
+    [];
 
-  numeros.forEach(n => {
-    const campo =
-      numeroACampo[Number(n)];
+  numeros.forEach(
+    n => {
+      const campo =
+        numeroACampo[
+          Number(n)
+        ];
 
-    if (campo) {
-      campos.add(campo);
+      if (campo) {
+        campos.add(
+          campo
+        );
+      }
     }
-  });
+  );
 
-  if (t.includes("fecha")) {
-    campos.add("Fecha de compra");
+  if (
+    t.includes(
+      "fecha"
+    )
+  ) {
+    campos.add(
+      "Fecha de compra"
+    );
   }
 
   if (
-    t.includes("producto base") ||
-    t.includes("nombre base")
+    t.includes(
+      "producto base"
+    ) ||
+    t.includes(
+      "nombre base"
+    )
   ) {
-    campos.add("Producto base");
+    campos.add(
+      "Producto base"
+    );
   }
 
-  const sinProductoBase = t
-    .replace(/producto base/g, "")
-    .replace(/nombre base/g, "");
+  const sinProductoBase =
+    t
+      .replace(
+        /producto base/g,
+        ""
+      )
+      .replace(
+        /nombre base/g,
+        ""
+      );
 
   if (
-    sinProductoBase.includes("producto")
+    sinProductoBase.includes(
+      "producto"
+    )
   ) {
-    campos.add("Producto");
+    campos.add(
+      "Producto"
+    );
   }
 
-  if (t.includes("categoria")) {
-    campos.add("Categoría");
+  if (
+    t.includes(
+      "categoria"
+    )
+  ) {
+    campos.add(
+      "Categoría"
+    );
   }
 
-  if (t.includes("tienda")) {
-    campos.add("Tienda");
+  if (
+    t.includes(
+      "tienda"
+    )
+  ) {
+    campos.add(
+      "Tienda"
+    );
   }
 
-  if (t.includes("cantidad")) {
-    campos.add("Cantidad");
+  if (
+    t.includes(
+      "cantidad"
+    )
+  ) {
+    campos.add(
+      "Cantidad"
+    );
   }
 
-  const mencionaContenidoEmpaque =
-    t.includes("contenido por empaque") ||
-    t.includes("contenido del empaque") ||
-    t.includes("contenido empaque");
+  const mencionaContenido =
+    t.includes(
+      "contenido por empaque"
+    ) ||
+    t.includes(
+      "contenido del empaque"
+    ) ||
+    t.includes(
+      "contenido empaque"
+    );
 
-  if (mencionaContenidoEmpaque) {
+  if (
+    mencionaContenido
+  ) {
     campos.add(
       "Contenido por empaque"
     );
   }
 
   const mencionaUnidadComparacion =
-    t.includes("unidad de comparacion") ||
-    t.includes("unidad comparacion");
+    t.includes(
+      "unidad de comparacion"
+    ) ||
+    t.includes(
+      "unidad comparacion"
+    );
 
-  if (mencionaUnidadComparacion) {
+  if (
+    mencionaUnidadComparacion
+  ) {
     campos.add(
       "Unidad de comparación"
     );
   }
 
   const mencionaPrecioUnidad =
-    t.includes("precio por unidad") ||
-    t.includes("precio unitario") ||
-    t.includes("unitario");
+    t.includes(
+      "precio por unidad"
+    ) ||
+    t.includes(
+      "precio unitario"
+    ) ||
+    t.includes(
+      "unitario"
+    );
 
-  if (mencionaPrecioUnidad) {
+  if (
+    mencionaPrecioUnidad
+  ) {
     campos.add(
       "Precio por unidad"
     );
   }
 
   if (
-    t.includes("monto") ||
-    t.includes("precio total") ||
+    t.includes(
+      "monto"
+    ) ||
+    t.includes(
+      "precio total"
+    ) ||
     (
-      t.includes("precio") &&
+      t.includes(
+        "precio"
+      ) &&
       !mencionaPrecioUnidad
     )
   ) {
-    campos.add("Monto");
+    campos.add(
+      "Monto"
+    );
   }
 
   if (
-    t.includes("unidad") &&
+    t.includes(
+      "unidad"
+    ) &&
+    !mencionaUnidadComparacion &&
     !mencionaPrecioUnidad &&
-    !mencionaUnidadComparacion
+    !mencionaContenido
   ) {
-    campos.add("Unidad");
+    campos.add(
+      "Unidad"
+    );
   }
 
   const hablaDeCorrectos =
-    t.includes("estan bien") ||
-    t.includes("esta bien") ||
-    t.includes("correctos") ||
-    t.includes("correcto");
+    t.includes(
+      "estan bien"
+    ) ||
+    t.includes(
+      "esta bien"
+    ) ||
+    t.includes(
+      "correctos"
+    ) ||
+    t.includes(
+      "correcto"
+    );
 
   return {
     accion:
@@ -4224,135 +3920,157 @@ function detectarCamposTicket(texto) {
         : "corregir",
 
     campos:
-      [...campos].filter(Boolean)
+      [...campos]
   };
 }
 
-  
+function explicacionCorreccionCampo(
+  campo
+) {
+  const mapa = {
+    "Fecha de compra":
+      'Ej.: “hoy” o “16/08/2026”.',
 
-function etiquetaCampoTicket(campo) {
-  if (campo === "Monto") {
-    return "Precio / Monto";
-  }
+    Producto:
+      "Producto = marca o presentación.\nEj.: Coca-Cola Zero 600 ml.",
 
-  return campo;
+    "Producto base":
+      "Producto base = tipo general, sin marca.\nEj.: refresco.",
+
+    Categoría:
+      "Categoría = grupo del gasto.\nEj.: bebidas.",
+
+    Monto:
+      "Monto = total pagado por ese producto.\nEj.: 120 pesos.",
+
+    Tienda:
+      "Ej.: Walmart, Costco o Soriana.",
+
+    Cantidad:
+      "Cantidad = empaques completos comprados.\nEj.: un paquete de 12 rollos → 1.",
+
+    Unidad:
+      "Unidad = tipo de empaque.\nEj.: paquete, caja, bolsa o botella.",
+
+    "Contenido por empaque":
+      "Contenido de CADA empaque.\nEj.: 12 rollos → 12; 600 ml → 0.6.",
+
+    "Unidad de comparación":
+      "Unidad práctica para comparar.\nEj.: rollo, litro, kilogramo o pieza.",
+
+    "Precio por unidad":
+      "Costo por unidad de comparación.\nNormalmente se calcula automáticamente."
+  };
+
+  return (
+    mapa[campo] ||
+    ""
+  );
 }
 
 function preguntaCorreccionCampo(
   campo,
-  registros
+  registros,
+  posicion = 1,
+  total = 1
 ) {
-  if (campo === "Fecha de compra") {
-    return (
-      "¿Cuál es la fecha correcta de la compra?\n" +
-      'Ejemplos: "hoy", "ayer" o "16/08/2026".'
+  const titulo =
+    etiquetaCampoCorta(
+      campo
     );
+
+  const explicacion =
+    explicacionCorreccionCampo(
+      campo
+    );
+
+  const encabezado =
+    total > 1
+      ? `✏️ *Corrección ${posicion} de ${total}*`
+      : "✏️ *Vamos a corregir*";
+
+  if (
+    campo ===
+    "Fecha de compra"
+  ) {
+    return [
+      encabezado,
+      "",
+      `Ahora: *${titulo}*`,
+      explicacion,
+      "",
+      `Actual: ${valorTicket(
+        registros[0]?.[
+          "Fecha de compra"
+        ]
+      )}`,
+      "",
+      "¿Cuál es la fecha correcta?"
+    ].join("\n");
   }
 
-  if (campo === "Tienda") {
-    return (
-      `Tienda actual: ${
-        valorTicket(
-          registros[0]?.Tienda
-        )
-      }\n` +
-      "¿Cuál es la tienda correcta?\n" +
-      "Ejemplos: Walmart, Costco, Soriana, Chedraui o Farmacia Guadalajara."
-    );
+  if (
+    campo ===
+    "Tienda"
+  ) {
+    return [
+      encabezado,
+      "",
+      `Ahora: *${titulo}*`,
+      explicacion,
+      "",
+      `Actual: ${valorTicket(
+        registros[0]?.Tienda
+      )}`,
+      "",
+      "¿Cuál es la tienda correcta?"
+    ].join("\n");
   }
 
   const actuales =
     registros
       .map(
-        (r, i) =>
-          `${i + 1}. ${
-            valorTicket(
-              r[campo],
-              campo === "Monto" ||
-              campo === "Precio por unidad"
-                ? "dinero"
-                : "texto"
+        (
+          r,
+          i
+        ) =>
+          `${i + 1}. ${valorTicket(
+            r[campo],
+            [
+              "Monto",
+              "Precio por unidad"
+            ].includes(
+              campo
             )
-          }`
+              ? "dinero"
+              : "texto"
+          )}`
       )
       .join("\n");
 
-  let explicacion = "";
-
-  if (campo === "Producto") {
-    explicacion =
-      "Producto es el artículo específico, con marca o presentación.\n" +
-      "Ejemplos: Coca-Cola Zero 600 ml, Galletas Marías Gamesa, Papel Higiénico Regio 12 rollos.";
-  }
-
-  if (campo === "Producto base") {
-    explicacion =
-      "Producto base es el artículo general, sin marca ni presentación, para comparar compras después.\n" +
-      "Ejemplos: refresco, galletas, papel higiénico, leche, agua mineral.";
-  }
-
-  if (campo === "Categoría") {
-    explicacion =
-      "Categoría es el grupo general del gasto.\n" +
-      "Ejemplos: bebidas, higiene, limpieza, despensa, lácteos, farmacia.";
-  }
-
-  if (campo === "Monto") {
-    explicacion =
-      "Monto es el total pagado por ese producto o renglón del ticket.\n" +
-      'Ejemplo: "120 pesos".';
-  }
-
-  if (campo === "Cantidad") {
-    explicacion =
-      "Cantidad es cuántos empaques o productos completos compraste.\n" +
-      "No cuentes aquí las piezas que vienen dentro del empaque.\n" +
-      'Ejemplo: 1 paquete de 12 rollos → responde "1".';
-  }
-
-  if (campo === "Unidad") {
-    explicacion =
-      "Unidad es el tipo de empaque o presentación que compraste.\n" +
-      "Ejemplos: paquete, caja, bolsa, botella, lata, pieza.";
-  }
-
-  if (campo === "Contenido por empaque") {
-    explicacion =
-      "Contenido por empaque indica cuánto trae CADA empaque, expresado en la unidad que usarás para comparar.\n" +
-      "Ejemplos:\n" +
-      "• Paquete de 12 rollos → 12\n" +
-      "• Caja de 24 latas → 24\n" +
-      "• Botella de 600 ml comparada por litro → 0.6\n" +
-      "• Bolsa de 750 g comparada por kilogramo → 0.75";
-  }
-
-  if (campo === "Unidad de comparación") {
-    explicacion =
-      "Unidad de comparación es la medida práctica con la que quieres comparar precios.\n" +
-      "Ejemplos: rollo, litro, kilogramo, pieza o lata.\n" +
-      "Papel higiénico → rollo; leche → litro; arroz → kilogramo.";
-  }
-
-  if (campo === "Precio por unidad") {
-    explicacion =
-      "Precio por unidad es el costo por la unidad de comparación.\n" +
-      "Normalmente el sistema lo calcula automáticamente.\n" +
-      "Ejemplo: 1 paquete de 12 rollos por $120 → $10 por rollo.";
-  }
-
-  if (registros.length === 1) {
+  if (
+    registros.length ===
+    1
+  ) {
     return [
-      `${etiquetaCampoTicket(campo)} actual: ${
-        valorTicket(
-          registros[0]?.[campo],
-          campo === "Monto" ||
-          campo === "Precio por unidad"
-            ? "dinero"
-            : "texto"
-        )
-      }`,
+      encabezado,
       "",
+      `Ahora: *${titulo}*`,
       explicacion,
+      "",
+      `Actual: ${valorTicket(
+        registros[0]?.[
+          campo
+        ],
+        [
+          "Monto",
+          "Precio por unidad"
+        ].includes(
+          campo
+        )
+          ? "dinero"
+          : "texto"
+      )}`,
       "",
       "¿Cuál debe ser?"
     ]
@@ -4361,15 +4079,16 @@ function preguntaCorreccionCampo(
   }
 
   return [
-    `Vamos a corregir: ${etiquetaCampoTicket(campo)}`,
+    encabezado,
     "",
+    `Ahora: *${titulo}*`,
     explicacion,
     "",
-    "Valores actuales:",
+    "*Valores actuales:*",
     actuales,
     "",
-    "Escribe los valores correctos, uno por línea y en el mismo orden.",
-    'Si alguno debe quedarse igual, escribe "igual".'
+    "Escribe un valor por producto, uno por línea.",
+    'Si alguno no cambia, escribe “igual”.'
   ]
     .filter(Boolean)
     .join("\n");
@@ -4380,79 +4099,120 @@ function extraerListaCorreccion(
   cantidad
 ) {
   let valores =
-    String(texto || "")
-      .split(/\n|;/)
-      .map(v => v.trim())
+    String(
+      texto ||
+      ""
+    )
+      .split(
+        /\n|;/
+      )
+      .map(
+        v =>
+          v.trim()
+      )
       .filter(Boolean)
-      .map(v =>
-        v
-          .replace(
-            /^\s*\d+\s*[.\)\-:]\s*/,
-            ""
-          )
-          .trim()
+      .map(
+        v =>
+          v
+            .replace(
+              /^\s*\d+\s*[.)\-:]\s*/,
+              ""
+            )
+            .trim()
       );
 
   if (
     cantidad > 1 &&
-    valores.length === 1
+    valores.length ===
+      1
   ) {
     const numerados =
-      String(texto || "")
+      String(
+        texto ||
+        ""
+      )
         .split(
-          /(?=\b\d+\s*[.\)\-:]\s*)/
+          /(?=\b\d+\s*[.)\-:]\s*)/
         )
-        .map(v => v.trim())
+        .map(
+          v =>
+            v.trim()
+        )
         .filter(Boolean)
-        .map(v =>
-          v
-            .replace(
-              /^\s*\d+\s*[.\)\-:]\s*/,
-              ""
-            )
-            .trim()
+        .map(
+          v =>
+            v
+              .replace(
+                /^\s*\d+\s*[.)\-:]\s*/,
+                ""
+              )
+              .trim()
         );
 
-    if (numerados.length > 1) {
-      valores = numerados;
+    if (
+      numerados.length >
+      1
+    ) {
+      valores =
+        numerados;
     }
   }
 
   return valores;
 }
 
-function numeroTicketSeguro(texto) {
+function numeroTicketSeguro(
+  texto
+) {
   let s =
-    String(texto || "")
+    String(
+      texto ||
+      ""
+    )
       .trim()
-      .replace(/\s/g, "");
+      .replace(
+        /\s/g,
+        ""
+      )
+      .replace(
+        /\$/g,
+        ""
+      );
 
-  if (!s) return null;
-
-  s =
-    s.replace(/\$/g, "");
+  if (!s) {
+    return null;
+  }
 
   if (
     s.includes(",") &&
     s.includes(".")
   ) {
     s =
-      s.replace(/,/g, "");
+      s.replace(
+        /,/g,
+        ""
+      );
 
-  } else if (s.includes(",")) {
+  } else if (
+    s.includes(",")
+  ) {
     const partes =
       s.split(",");
 
     if (
-      partes.length === 2 &&
-      partes[1].length <= 2
+      partes.length ===
+        2 &&
+      partes[1].length <=
+        2
     ) {
       s =
         `${partes[0]}.${partes[1]}`;
-
     } else {
       s =
-        s.replace(/,/g, "");
+        s.replace(
+          /,/g,
+          ""
+        );
     }
   }
 
@@ -4461,46 +4221,60 @@ function numeroTicketSeguro(texto) {
       /-?\d+(?:\.\d+)?/
     );
 
-  if (!m) return null;
+  if (!m) {
+    return null;
+  }
 
   const n =
-    Number(m[0]);
+    Number(
+      m[0]
+    );
 
-  return Number.isFinite(n)
+  return Number.isFinite(
+    n
+  )
     ? n
     : null;
 }
-
 function siguienteCorreccionTicket(
   remitente,
   registros,
-  camposPendientes
+  camposPendientes,
+  introduccion = false,
+  totalCorrecciones = null,
+  posicionCorreccion = 1
 ) {
   if (!camposPendientes.length) {
     guardarSesion(
       remitente,
       {
         tipo:
-          "ticket_super_confirmacion",
+          "ticket_super_confirmacion_final",
 
         registros
       }
     );
 
-    return (
-      "Así quedaría el ticket:\n\n" +
+    return [
       resumenTicketSuper(
         registros
-      ) +
-      "\n\n¿Está correcto? Responde sí o no."
-    );
+      ),
+      "",
+      "✅ *Revisión final*",
+      "¿Está correcto?",
+      "✅ Sí, guardar",
+      "✏️ No, corregir"
+    ].join("\n");
   }
+
+  const total =
+    totalCorrecciones ||
+    camposPendientes.length;
 
   const [
     campoActual,
     ...restantes
-  ] =
-    camposPendientes;
+  ] = camposPendientes;
 
   guardarSesion(
     remitente,
@@ -4513,14 +4287,38 @@ function siguienteCorreccionTicket(
       campoActual,
 
       camposPendientes:
-        restantes
+        restantes,
+
+      totalCorrecciones:
+        total,
+
+      posicionCorreccion
     }
   );
 
-  return preguntaCorreccionCampo(
-    campoActual,
-    registros
-  );
+  let pregunta =
+    preguntaCorreccionCampo(
+      campoActual,
+      registros,
+      posicionCorreccion,
+      total
+    );
+
+  if (introduccion) {
+    pregunta =
+      pregunta.replace(
+        /^✏️ \*[^\n]+\*\n\n/,
+        ""
+      );
+
+    return [
+      "✏️ *Vamos a corregir los campos incorrectos*",
+      "",
+      pregunta
+    ].join("\n");
+  }
+
+  return pregunta;
 }
 
 async function aplicarCorreccionTicket(
@@ -4567,22 +4365,28 @@ async function aplicarCorreccionTicket(
         }
       );
 
-    const f =
+    const fecha =
       interpretacion.data?.[
         "Fecha de compra"
       ];
 
-    if (estaVacio(f)) {
+    if (
+      estaVacio(
+        fecha
+      )
+    ) {
       throw new Error(
         "No pude interpretar esa fecha."
       );
     }
 
     nuevos.forEach(
-      r =>
+      r => {
         r[
           "Fecha de compra"
-        ] = f
+        ] =
+          fecha;
+      }
     );
 
     return nuevos;
@@ -4605,9 +4409,10 @@ async function aplicarCorreccionTicket(
     }
 
     nuevos.forEach(
-      r =>
+      r => {
         r.Tienda =
-          tienda
+          tienda;
+      }
     );
 
     return nuevos;
@@ -4638,59 +4443,63 @@ async function aplicarCorreccionTicket(
     );
   }
 
-  const numerico =
-    [
-      "Monto",
-      "Cantidad",
-      "Contenido por empaque",
-      "Precio por unidad"
-    ].includes(
-      campo
-    );
+  const numerico = [
+    "Monto",
+    "Cantidad",
+    "Contenido por empaque",
+    "Precio por unidad"
+  ].includes(
+    campo
+  );
 
   nuevos.forEach(
-    (r, i) => {
+    (
+      registro,
+      indice
+    ) => {
       const valor =
         valores[
           nuevos.length === 1
             ? 0
-            : i
+            : indice
         ];
-
-      const nv =
-        normalizar(
-          valor
-        );
 
       if (
         [
           "igual",
           "dejar igual",
           "sin cambio"
-        ].includes(nv)
+        ].includes(
+          normalizar(
+            valor
+          )
+        )
       ) {
         return;
       }
 
       if (numerico) {
-        const n =
+        const numero =
           numeroTicketSeguro(
             valor
           );
 
-        if (n === null) {
+        if (
+          numero === null
+        ) {
           throw new Error(
-            `No pude interpretar el valor ${i + 1} como número.`
+            `No pude interpretar el valor ${indice + 1} como número.`
           );
         }
 
-        r[campo] =
-          n;
+        registro[campo] =
+          numero;
 
       } else {
-        r[campo] =
+        registro[campo] =
           String(
-            valor || ""
+            valor ||
+            ""
           ).trim();
       }
 
@@ -4699,55 +4508,66 @@ async function aplicarCorreccionTicket(
           "Monto",
           "Cantidad",
           "Contenido por empaque"
-        ].includes(campo)
+        ].includes(
+          campo
+        )
       ) {
         const monto =
           valorNumero(
-            r.Monto
+            registro.Monto
           );
 
         const cantidad =
           valorNumero(
-            r.Cantidad
+            registro.Cantidad
           );
 
         const contenido =
           valorNumero(
-            r[
+            registro[
               "Contenido por empaque"
             ]
           );
 
-        if (
+        registro[
+          "Precio por unidad"
+        ] =
           monto > 0 &&
           cantidad > 0 &&
           contenido > 0
-        ) {
-          r[
-            "Precio por unidad"
-          ] =
-            Math.round(
-              (
-                monto /
+            ? Math.round(
                 (
-                  cantidad *
-                  contenido
-                )
-              ) *
+                  monto /
+                  (
+                    cantidad *
+                    contenido
+                  )
+                ) *
+                100
+              ) /
               100
-            ) /
-            100;
-
-        } else {
-          r[
-            "Precio por unidad"
-          ] = "";
-        }
+            : "";
       }
     }
   );
 
   return nuevos;
+}
+
+function mensajeRevisionTicket(
+  registros
+) {
+  return [
+    "🧾 *Del ticket voy a registrar esto*",
+    "",
+    resumenTicketSuper(
+      registros
+    ),
+    "",
+    "¿Está correcto lo que leí?",
+    "✅ Sí",
+    "✏️ No, corregir"
+  ].join("\n");
 }
 
 async function procesarImagenRecibida(
@@ -4781,7 +4601,8 @@ async function procesarImagenRecibida(
     const data =
       completarDatosCalculados(
         "Pagos",
-        analisis.data || {},
+        analisis.data ||
+        {},
         "Foto de recibo recibida por WhatsApp"
       );
 
@@ -4808,11 +4629,23 @@ async function procesarImagenRecibida(
       items
         .filter(
           item =>
-            !estaVacio(
-              item.Producto
-            ) &&
-            !estaVacio(
-              item.Monto
+            item &&
+            typeof item ===
+              "object" &&
+            [
+              "Producto",
+              "Producto base",
+              "Categoría",
+              "Monto",
+              "Cantidad",
+              "Unidad",
+              "Contenido por empaque",
+              "Unidad de comparación"
+            ].some(
+              campo =>
+                !estaVacio(
+                  item[campo]
+                )
             )
         )
         .map(
@@ -4824,111 +4657,71 @@ async function procesarImagenRecibida(
         );
 
     if (
-      registros.length === 0
+      !registros.length
     ) {
-      return (
-        "Pude ver el ticket, pero no pude leer con suficiente seguridad los productos y sus precios. " +
-        "Puedes mandarme una foto más clara o dictarme los datos."
-      );
+      return [
+        "Pude ver el ticket, pero no pude leer con seguridad los productos.",
+        "Prueba con otra foto o dime los datos por mensaje."
+      ].join("\n");
     }
 
-    if (
-      registros.some(
-        r =>
-          estaVacio(
-            r[
-              "Fecha de compra"
-            ]
-          )
-      )
-    ) {
-      guardarSesion(
-        remitente,
-        {
-          tipo:
-            "ticket_super_fecha",
-
-          registros
-        }
-      );
-
-      return (
-        `Pude leer ${registros.length} producto(s), pero no alcanzo a ver bien la fecha.\n` +
-        "¿Qué fecha le pongo?"
-      );
-    }
-
-    if (
-      registros.some(
-        r =>
-          estaVacio(
-            r.Tienda
-          )
-      )
-    ) {
-      guardarSesion(
-        remitente,
-        {
-          tipo:
-            "ticket_super_tienda",
-
-          registros
-        }
-      );
-
-      return (
-        `Pude leer ${registros.length} producto(s), pero no alcanzo a identificar bien la tienda.\n` +
-        "¿En qué tienda fue?"
-      );
-    }
-const camposFaltantes =
-  CAMPOS_REQUERIDOS.Super.filter(
-    campo =>
-      registros.some(
-        r =>
-          estaVacio(
-            r[campo]
-          )
-      )
-  );
-
-if (
-  camposFaltantes.length
-) {
-  return siguienteCorreccionTicket(
-    remitente,
-    registros,
-    camposFaltantes
-  );
-}
     guardarSesion(
       remitente,
       {
         tipo:
-          "ticket_super_confirmacion",
+          "ticket_super_revision",
 
         registros
       }
     );
 
-    return (
-      "Del ticket voy a registrar esto:\n\n" +
-      resumenTicketSuper(
-        registros
-      ) +
-      "\n\n¿Está correcto? Responde sí o no."
+    return mensajeRevisionTicket(
+      registros
     );
   }
 
-  return (
-    "No pude identificar con seguridad si la imagen es un ticket del súper o un recibo de pago." +
-    (
-      analisis.descripcion
-        ? `\n\nAlcancé a ver: ${analisis.descripcion}`
-        : ""
-    ) +
-    "\n\nDime si quieres registrarlo en Súper o en Pagos."
+  return [
+    "No pude identificar con seguridad el tipo de imagen.",
+    analisis.descripcion
+      ? `Alcancé a ver: ${analisis.descripcion}`
+      : "",
+    "Dime si quieres registrarlo en *Súper* o en *Pagos*."
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+async function guardarTicketSuper(
+  remitente,
+  registros
+) {
+  const ids = [];
+
+  for (
+    const registro
+    of registros
+  ) {
+    const resultado =
+      await guardarEnSheets(
+        "Super",
+        registro
+      );
+
+    ids.push(
+      resultado.id
+    );
+  }
+
+  sesiones.delete(
+    remitente
   );
+
+  return [
+    "✅ *Ticket guardado*",
+    SEPARADOR,
+    `Productos: ${ids.length}`,
+    `IDs: ${ids.join(", ")}`
+  ].join("\n");
 }
 
 async function procesarTicketPendiente(
@@ -4943,203 +4736,56 @@ async function procesarTicketPendiente(
 
   if (
     sesion.tipo ===
-    "ticket_super_fecha"
-  ) {
-    const interpretacion =
-      await interpretarConGemini(
-        `La fecha es ${textoUsuario}`,
-        {
-          sheet:
-            "Super",
-
-          data:
-            sesion.registros[0]
-        }
-      );
-
-    const f =
-      interpretacion.data?.[
-        "Fecha de compra"
-      ];
-
-    if (
-      estaVacio(f)
-    ) {
-      return (
-        'No pude interpretar esa fecha. Dímela otra vez, por ejemplo: "hoy" o "16/08/2026".'
-      );
-    }
-
-    const registros =
-      sesion.registros.map(
-        r => ({
-          ...r,
-
-          "Fecha de compra":
-            f
-        })
-      );
-
-    if (
-      registros.some(
-        r =>
-          estaVacio(
-            r.Tienda
-          )
-      )
-    ) {
-      guardarSesion(
-        remitente,
-        {
-          tipo:
-            "ticket_super_tienda",
-
-          registros
-        }
-      );
-
-      return (
-        "Perfecto. ¿En qué tienda fue la compra?"
-      );
-    }
-const camposFaltantes =
-  CAMPOS_REQUERIDOS.Super.filter(
-    campo =>
-      registros.some(
-        r =>
-          estaVacio(
-            r[campo]
-          )
-      )
-  );
-
-if (camposFaltantes.length) {
-  return siguienteCorreccionTicket(
-    remitente,
-    registros,
-    camposFaltantes
-  );
-}
-    guardarSesion(
-      remitente,
-      {
-        tipo:
-          "ticket_super_confirmacion",
-
-        registros
-      }
-    );
-
-    return (
-      "Del ticket voy a registrar esto:\n\n" +
-      resumenTicketSuper(
-        registros
-      ) +
-      "\n\n¿Está correcto? Responde sí o no."
-    );
-  }
-
-  if (
-    sesion.tipo ===
-    "ticket_super_tienda"
-  ) {
-    const tienda =
-      String(
-        textoUsuario ||
-        ""
-      ).trim();
-
-    if (!tienda) {
-      return (
-        "Dime el nombre de la tienda."
-      );
-    }
-
-    const registros =
-      sesion.registros.map(
-        r => ({
-          ...r,
-
-          Tienda:
-            tienda
-        })
-      );
-const camposFaltantes =
-  CAMPOS_REQUERIDOS.Super.filter(
-    campo =>
-      registros.some(
-        r =>
-          estaVacio(
-            r[campo]
-          )
-      )
-  );
-
-if (camposFaltantes.length) {
-  return siguienteCorreccionTicket(
-    remitente,
-    registros,
-    camposFaltantes
-  );
-}
-    guardarSesion(
-      remitente,
-      {
-        tipo:
-          "ticket_super_confirmacion",
-
-        registros
-      }
-    );
-
-    return (
-      "Del ticket voy a registrar esto:\n\n" +
-      resumenTicketSuper(
-        registros
-      ) +
-      "\n\n¿Está correcto? Responde sí o no."
-    );
-  }
-
-  if (
-    sesion.tipo ===
-    "ticket_super_confirmacion"
+    "ticket_super_revision"
   ) {
     if (
       respuestaSi(
         textoUsuario
       )
     ) {
-      const ids = [];
+      const faltantes =
+        camposFaltantesTicket(
+          sesion.registros
+        );
 
-      for (
-        const registro
-        of sesion.registros
+      if (
+        faltantes.length
       ) {
-        const resultado =
-          await guardarEnSheets(
-            "Super",
-            registro
-          );
-
-        ids.push(
-          resultado.id
+        return siguienteCorreccionTicket(
+          remitente,
+          sesion.registros,
+          faltantes,
+          true
         );
       }
 
-      sesiones.delete(
-        remitente
+      guardarSesion(
+        remitente,
+        {
+          tipo:
+            "ticket_super_confirmacion_final",
+
+          registros:
+            sesion.registros
+        }
       );
 
-      return (
-        `Listo. Guardé ${ids.length} producto(s) del ticket.\n` +
-        `IDs: ${ids.join(", ")}`
-      );
+      return [
+        resumenTicketSuper(
+          sesion.registros
+        ),
+        "",
+        "✅ *Revisión final*",
+        "¿Confirmas que lo guarde?",
+        "✅ Sí",
+        "✏️ No, corregir"
+      ].join("\n");
     }
 
     if (
-      respuestaNo(
-        textoUsuario
+      t === "no" ||
+      t.includes(
+        "corregir"
       )
     ) {
       guardarSesion(
@@ -5153,13 +4799,77 @@ if (camposFaltantes.length) {
         }
       );
 
+      return menuCorreccionTicket();
+    }
+
+    if (
+      t === "cancelar" ||
+      t === "cancela"
+    ) {
+      sesiones.delete(
+        remitente
+      );
+
       return (
-        menuCorreccionTicket()
+        "No guardé nada del ticket."
       );
     }
 
     return (
-      "Responde sí si todo está correcto o no si quieres corregir algo."
+      "Responde *sí* si lo leído está correcto, *no* para corregir o *cancelar*."
+    );
+  }
+
+  if (
+    sesion.tipo ===
+    "ticket_super_confirmacion_final"
+  ) {
+    if (
+      respuestaSi(
+        textoUsuario
+      )
+    ) {
+      return guardarTicketSuper(
+        remitente,
+        sesion.registros
+      );
+    }
+
+    if (
+      t === "no" ||
+      t.includes(
+        "corregir"
+      )
+    ) {
+      guardarSesion(
+        remitente,
+        {
+          tipo:
+            "ticket_super_elegir_correccion",
+
+          registros:
+            sesion.registros
+        }
+      );
+
+      return menuCorreccionTicket();
+    }
+
+    if (
+      t === "cancelar" ||
+      t === "cancela"
+    ) {
+      sesiones.delete(
+        remitente
+      );
+
+      return (
+        "No guardé nada del ticket."
+      );
+    }
+
+    return (
+      "Responde *sí* para guardar, *no* para corregir o *cancelar*."
     );
   }
 
@@ -5189,32 +4899,49 @@ if (camposFaltantes.length) {
       seleccion.accion ===
       "confirmar"
     ) {
+      const faltantes =
+        camposFaltantesTicket(
+          sesion.registros
+        );
+
+      if (
+        faltantes.length
+      ) {
+        return siguienteCorreccionTicket(
+          remitente,
+          sesion.registros,
+          faltantes,
+          true
+        );
+      }
+
       guardarSesion(
         remitente,
         {
           tipo:
-            "ticket_super_confirmacion",
+            "ticket_super_confirmacion_final",
 
           registros:
             sesion.registros
         }
       );
 
-      return (
-        "Perfecto. Revisa una última vez:\n\n" +
+      return [
         resumenTicketSuper(
           sesion.registros
-        ) +
-        "\n\n¿Está correcto? Responde sí o no."
-      );
+        ),
+        "",
+        "✅ *Revisión final*",
+        "¿Confirmas que lo guarde?",
+        "✅ Sí",
+        "✏️ No, corregir"
+      ].join("\n");
     }
 
     if (
       !seleccion.campos.length
     ) {
-      return (
-        menuCorreccionTicket()
-      );
+      return menuCorreccionTicket();
     }
 
     let campos;
@@ -5223,16 +4950,11 @@ if (camposFaltantes.length) {
       seleccion.accion ===
       "correctos"
     ) {
-      const disponibles =
-        camposConDatosTicket(
-          sesion.registros
-        );
-
       campos =
-        disponibles.filter(
-          c =>
+        CAMPOS_CORRECCION_TICKET.filter(
+          campo =>
             !seleccion.campos.includes(
-              c
+              campo
             )
         );
 
@@ -5242,13 +4964,12 @@ if (camposFaltantes.length) {
     }
 
     campos =
-      CAMPOS_CORRECCION_TICKET
-        .filter(
-          c =>
-            campos.includes(
-              c
-            )
-        );
+      CAMPOS_CORRECCION_TICKET.filter(
+        campo =>
+          campos.includes(
+            campo
+          )
+      );
 
     if (
       !campos.length
@@ -5257,26 +4978,30 @@ if (camposFaltantes.length) {
         remitente,
         {
           tipo:
-            "ticket_super_confirmacion",
+            "ticket_super_confirmacion_final",
 
           registros:
             sesion.registros
         }
       );
 
-      return (
-        "Entonces no tengo nada más que corregir. Revisa una última vez:\n\n" +
+      return [
         resumenTicketSuper(
           sesion.registros
-        ) +
-        "\n\n¿Está correcto? Responde sí o no."
-      );
+        ),
+        "",
+        "✅ *Revisión final*",
+        "¿Confirmas que lo guarde?",
+        "✅ Sí",
+        "✏️ No, corregir"
+      ].join("\n");
     }
 
     return siguienteCorreccionTicket(
       remitente,
       sesion.registros,
-      campos
+      campos,
+      true
     );
   }
 
@@ -5308,20 +5033,32 @@ if (camposFaltantes.length) {
         );
 
     } catch (error) {
-      return (
-        `${error.message}\n\n` +
+      return [
+        `⚠️ ${error.message}`,
+        "",
         preguntaCorreccionCampo(
           sesion.campoActual,
-          sesion.registros
+          sesion.registros,
+          sesion.posicionCorreccion ||
+            1,
+          sesion.totalCorrecciones ||
+            1
         )
-      );
+      ].join("\n");
     }
 
     return siguienteCorreccionTicket(
       remitente,
       registros,
       sesion.camposPendientes ||
-        []
+        [],
+      false,
+      sesion.totalCorrecciones ||
+        null,
+      (
+        sesion.posicionCorreccion ||
+        1
+      ) + 1
     );
   }
 
@@ -5368,10 +5105,11 @@ async function procesarAudioRecibido(
       remitente
     );
 
-  return (
-    `🎙️ Entendí: "${transcripcion}"\n\n` +
+  return [
+    `🎙️ *Entendí:* “${transcripcion}”`,
+    "",
     respuesta
-  );
+  ].join("\n");
 }
 
 function mensajeFalloIA(
@@ -5399,8 +5137,7 @@ function mensajeFalloIA(
     )
   ) {
     return (
-      "Recibí tu mensaje, pero Gemini alcanzó temporalmente su límite de uso. " +
-      "No guardé ni cambié nada. Puedes intentar de nuevo más tarde."
+      "La IA alcanzó temporalmente su límite de uso. No guardé ni cambié nada. Intenta de nuevo más tarde."
     );
   }
 
@@ -5409,14 +5146,12 @@ function mensajeFalloIA(
     status === 403
   ) {
     return (
-      "Recibí tu mensaje, pero la conexión con Gemini necesita revisión. " +
-      "No guardé ni cambié nada."
+      "La conexión con la IA necesita revisión. No guardé ni cambié nada."
     );
   }
 
   return (
-    "Recibí tu mensaje, pero la IA no pudo procesarlo en este momento. " +
-    "No guardé ni cambié nada."
+    "La IA no pudo procesar el mensaje en este momento. No guardé ni cambié nada."
   );
 }
 
@@ -5443,10 +5178,12 @@ async function procesarMensaje(
 
   if (sesion) {
     if (
-      sesion.tipo ===
-        "eliminar_seleccion" ||
-      sesion.tipo ===
+      [
+        "eliminar_seleccion",
         "eliminar_confirmacion"
+      ].includes(
+        sesion.tipo
+      )
     ) {
       return procesarEliminacionPendiente(
         texto,
@@ -5617,7 +5354,7 @@ async function procesarMensaje(
       completarDatosCalculados(
         sheet,
         interpretacion.data ||
-          {},
+        {},
         texto
       );
 
@@ -5655,8 +5392,7 @@ async function procesarMensaje(
   ) {
     return procesarReporte(
       interpretacion.mes ||
-      mesActualMexico(),
-
+        mesActualMexico(),
       Boolean(
         interpretacion.grafica
       )
@@ -5667,6 +5403,14 @@ async function procesarMensaje(
     interpretacion.accion ===
     "historial_producto"
   ) {
+    if (
+      !interpretacion.producto
+    ) {
+      return (
+        "¿De qué producto quieres consultar el historial?"
+      );
+    }
+
     const resultado =
       await consultarHistorialProducto(
         interpretacion.producto,
@@ -5720,10 +5464,7 @@ async function procesarMensaje(
   );
 }
 async function suscribirWhatsApp() {
-  if (
-    !WHATSAPP_TOKEN ||
-    !WABA_ID
-  ) {
+  if (!WHATSAPP_TOKEN || !WABA_ID) {
     console.log(
       "No se intentó suscribir WhatsApp porque falta token o WABA_ID."
     );
@@ -5732,38 +5473,31 @@ async function suscribirWhatsApp() {
   }
 
   try {
-    const respuesta =
-      await fetch(
-        `https://graph.facebook.com/${GRAPH_VERSION}/${WABA_ID}/subscribed_apps?subscribed_fields=messages`,
-        {
-          method:
-            "POST",
+    const respuesta = await fetch(
+      `https://graph.facebook.com/${GRAPH_VERSION}/${WABA_ID}/subscribed_apps?subscribed_fields=messages`,
+      {
+        method: "POST",
 
-          headers: {
-            Authorization:
-              `Bearer ${WHATSAPP_TOKEN}`,
+        headers: {
+          Authorization:
+            `Bearer ${WHATSAPP_TOKEN}`,
 
-            "Content-Type":
-              "application/json"
-          }
+          "Content-Type":
+            "application/json"
         }
-      );
+      }
+    );
 
-    const datos =
-      await respuesta
-        .json()
-        .catch(
-          () => ({})
-        );
+    const datos = await respuesta
+      .json()
+      .catch(() => ({}));
 
     console.log(
       "Suscripción WhatsApp:",
       datos
     );
 
-    if (
-      !respuesta.ok
-    ) {
+    if (!respuesta.ok) {
       console.error(
         "No se pudo suscribir WhatsApp:",
         datos
@@ -5786,17 +5520,13 @@ function normalizarRemitente(
   }
 
   const limpio =
-    String(numero)
-      .replace(
-        /\D/g,
-        ""
-      );
+    String(
+      numero
+    ).replace(
+      /\D/g,
+      ""
+    );
 
-  /*
-    Algunos números mexicanos
-    pueden llegar como 521...
-    Los normalizamos a 52...
-  */
   if (
     limpio.startsWith(
       "521"
@@ -5821,8 +5551,7 @@ async function procesarMensajeWhatsApp(
     mensaje.text?.body
   ) {
     const texto =
-      mensaje.text.body
-        .trim();
+      mensaje.text.body.trim();
 
     console.log(
       "Texto recibido:",
@@ -5857,24 +5586,19 @@ async function procesarMensajeWhatsApp(
         error
       );
 
-      const status =
+      if (
         Number(
           error?.status ||
           0
-        );
-
-      if (
-        status === 429
+        ) === 429
       ) {
         return (
-          "Recibí la foto, pero Gemini alcanzó temporalmente su límite gratuito. " +
-          "No guardé nada. Puedes intentarlo después o decirme los datos manualmente."
+          "Recibí la foto, pero la IA alcanzó temporalmente su límite. No guardé nada. Inténtalo después o dicta los datos."
         );
       }
 
       return (
-        "Recibí la foto, pero no pude leerla correctamente. " +
-        "No guardé nada. Puedes intentar con otra foto o dictarme los datos."
+        "Recibí la foto, pero no pude leerla correctamente. No guardé nada. Prueba con otra foto o dicta los datos."
       );
     }
   }
@@ -5901,30 +5625,25 @@ async function procesarMensajeWhatsApp(
         error
       );
 
-      const status =
+      if (
         Number(
           error?.status ||
           0
-        );
-
-      if (
-        status === 429
+        ) === 429
       ) {
         return (
-          "Recibí tu audio, pero Gemini alcanzó temporalmente su límite gratuito. " +
-          "No guardé nada. Puedes escribirme el mensaje o intentarlo después."
+          "Recibí tu audio, pero la IA alcanzó temporalmente su límite. No guardé nada. Puedes escribir el mensaje."
         );
       }
 
       return (
-        "Recibí tu audio, pero no pude entenderlo correctamente. " +
-        "No guardé nada. Puedes intentar otra vez o escribirme el mensaje."
+        "Recibí tu audio, pero no pude entenderlo. No guardé nada. Intenta otra vez o escríbelo."
       );
     }
   }
 
   return (
-    "Por ahora puedo recibir texto, fotos de tickets o recibos y mensajes de voz."
+    "Por ahora puedo recibir texto, fotos de tickets/recibos y mensajes de voz."
   );
 }
 
@@ -5932,8 +5651,7 @@ async function manejarWebhook(
   payload
 ) {
   const value =
-    payload
-      ?.entry?.[0]
+    payload?.entry?.[0]
       ?.changes?.[0]
       ?.value;
 
@@ -5944,8 +5662,7 @@ async function manejarWebhook(
     !Array.isArray(
       mensajes
     ) ||
-    mensajes.length ===
-      0
+    !mensajes.length
   ) {
     return;
   }
@@ -5988,13 +5705,7 @@ async function manejarWebhook(
         mensaje.from
       );
 
-    if (
-      !remitente
-    ) {
-      console.log(
-        "Mensaje sin remitente."
-      );
-
+    if (!remitente) {
       continue;
     }
 
@@ -6005,9 +5716,7 @@ async function manejarWebhook(
           remitente
         );
 
-      if (
-        respuesta
-      ) {
+      if (respuesta) {
         await enviarMensajeWhatsApp(
           remitente,
           respuesta
@@ -6023,12 +5732,10 @@ async function manejarWebhook(
       try {
         await enviarMensajeWhatsApp(
           remitente,
-          "Recibí tu mensaje, pero ocurrió un problema. No guardé ni cambié nada. Inténtalo nuevamente."
+          "Ocurrió un problema. No guardé ni cambié nada. Inténtalo nuevamente."
         );
 
-      } catch (
-        errorEnvio
-      ) {
+      } catch (errorEnvio) {
         console.error(
           "También falló el envío del mensaje de error:",
           errorEnvio
@@ -6047,11 +5754,6 @@ const server =
           `http://${req.headers.host}`
         );
 
-      /*
-        Página principal.
-        Sirve también para comprobar
-        que Render está vivo.
-      */
       if (
         req.method ===
           "GET" &&
@@ -6071,9 +5773,6 @@ const server =
         );
       }
 
-      /*
-        Health check.
-      */
       if (
         req.method ===
           "GET" &&
@@ -6090,8 +5789,7 @@ const server =
 
         return res.end(
           JSON.stringify({
-            ok:
-              true,
+            ok: true,
 
             servicio:
               "Finanzas IA V3",
@@ -6115,9 +5813,6 @@ const server =
         );
       }
 
-      /*
-        Política de privacidad.
-      */
       if (
         req.method ===
           "GET" &&
@@ -6132,49 +5827,11 @@ const server =
           }
         );
 
-        return res.end(`
-          <!DOCTYPE html>
-          <html lang="es">
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>Política de privacidad - Finanzas IA</title>
-          </head>
-          <body>
-            <h1>Política de privacidad</h1>
-            <p>
-              Finanzas IA es una aplicación de uso personal.
-            </p>
-            <p>
-              Procesa únicamente la información necesaria
-              para registrar y consultar información financiera
-              enviada por el usuario.
-            </p>
-            <p>
-              La aplicación puede procesar mensajes de texto,
-              imágenes y audios enviados voluntariamente
-              mediante WhatsApp.
-            </p>
-            <p>
-              No vendemos información personal.
-            </p>
-            <p>
-              Los datos financieros se almacenan en
-              una hoja privada de Google Sheets
-              controlada por el propietario de la aplicación.
-            </p>
-            <p>
-              Contacto: zurita-17@hotmail.com
-            </p>
-          </body>
-          </html>
-        `);
+        return res.end(
+          `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Política de privacidad - Finanzas IA</title></head><body><h1>Política de privacidad</h1><p>Finanzas IA es una aplicación de uso personal.</p><p>Procesa únicamente la información necesaria para registrar y consultar información financiera enviada por el usuario.</p><p>La aplicación puede procesar mensajes de texto, imágenes y audios enviados voluntariamente mediante WhatsApp.</p><p>No vendemos información personal.</p><p>Los datos financieros se almacenan en una hoja privada de Google Sheets controlada por el propietario de la aplicación.</p><p>Contacto: zurita-17@hotmail.com</p></body></html>`
+        );
       }
 
-      /*
-        Verificación inicial
-        del webhook de Meta.
-      */
       if (
         req.method ===
           "GET" &&
@@ -6202,10 +5859,6 @@ const server =
           token ===
             VERIFY_TOKEN
         ) {
-          console.log(
-            "Webhook verificado correctamente."
-          );
-
           res.writeHead(
             200,
             {
@@ -6233,18 +5886,13 @@ const server =
         );
       }
 
-      /*
-        Recepción de mensajes
-        desde WhatsApp.
-      */
       if (
         req.method ===
           "POST" &&
         url.pathname ===
           "/webhook"
       ) {
-        let body =
-          "";
+        let body = "";
 
         req.on(
           "data",
@@ -6252,10 +5900,6 @@ const server =
             body +=
               chunk;
 
-            /*
-              Evita recibir cuerpos
-              exageradamente grandes.
-            */
             if (
               body.length >
               2_000_000
@@ -6295,13 +5939,6 @@ const server =
               );
             }
 
-            /*
-              Meta necesita recibir
-              respuesta rápidamente.
-
-              Confirmamos primero
-              y procesamos después.
-            */
             res.writeHead(
               200,
               {
@@ -6314,22 +5951,14 @@ const server =
               "EVENT_RECEIVED"
             );
 
-            console.log(
-              "Webhook recibido:",
-              JSON.stringify(
-                payload
-              )
-            );
-
             manejarWebhook(
               payload
             ).catch(
-              error => {
+              error =>
                 console.error(
                   "Error general del webhook:",
                   error
-                );
-              }
+                )
             );
           }
         );
@@ -6337,9 +5966,6 @@ const server =
         return;
       }
 
-      /*
-        Cualquier otra ruta.
-      */
       res.writeHead(
         404,
         {
@@ -6370,9 +5996,7 @@ server.on(
         "HTTP/1.1 400 Bad Request\r\n\r\n"
       );
 
-    } catch {
-      // Nada adicional.
-    }
+    } catch {}
   }
 );
 
@@ -6394,11 +6018,6 @@ server.listen(
       console.error(
         "Falta WHATSAPP_TOKEN."
       );
-
-    } else {
-      console.log(
-        "WHATSAPP_TOKEN detectado."
-      );
     }
 
     if (
@@ -6406,11 +6025,6 @@ server.listen(
     ) {
       console.error(
         "Falta GEMINI_API_KEY."
-      );
-
-    } else {
-      console.log(
-        "GEMINI_API_KEY detectada."
       );
     }
 
@@ -6420,11 +6034,6 @@ server.listen(
       console.error(
         "Falta APPS_SCRIPT_URL."
       );
-
-    } else {
-      console.log(
-        "APPS_SCRIPT_URL detectada."
-      );
     }
 
     if (
@@ -6433,26 +6042,8 @@ server.listen(
       console.error(
         "Falta APPS_SCRIPT_SECRET."
       );
-
-    } else {
-      console.log(
-        "APPS_SCRIPT_SECRET detectado."
-      );
     }
 
-    if (
-      !VERIFY_TOKEN
-    ) {
-      console.error(
-        "Falta VERIFY_TOKEN."
-      );
-    }
-
-    /*
-      Intentamos mantener
-      la aplicación suscrita
-      a los mensajes de WhatsApp.
-    */
     if (
       WHATSAPP_TOKEN
     ) {
