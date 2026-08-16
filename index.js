@@ -3888,26 +3888,796 @@ async function procesarImagenRecibida(
   );
 }
 
+function valorTicket(valor, tipo = "texto") {
+  if (estaVacio(valor)) return "—";
+  if (tipo === "dinero") return formatearDinero(valor);
+  return String(valor);
+}
+
+function resumenTicketSuper(registros) {
+  if (!Array.isArray(registros) || registros.length === 0) {
+    return "No hay productos para mostrar.";
+  }
+
+  const primero = registros[0] || {};
+
+  const cabecera = [
+    `Fecha de compra: ${valorTicket(primero["Fecha de compra"])}`,
+    `Tienda: ${valorTicket(primero.Tienda)}`
+  ].join("\n");
+
+  const productos = registros
+    .map((r, i) =>
+      [
+        `Producto ${i + 1}`,
+        `Producto: ${valorTicket(r.Producto)}`,
+        `Producto base: ${valorTicket(r["Producto base"])}`,
+        `Categoría: ${valorTicket(r.Categoría)}`,
+        `Monto: ${valorTicket(r.Monto, "dinero")}`,
+        `Cantidad: ${valorTicket(r.Cantidad)}`,
+        `Unidad: ${valorTicket(r.Unidad)}`,
+        `Precio por unidad: ${
+          estaVacio(r["Precio por unidad"])
+            ? "—"
+            : formatearDinero(r["Precio por unidad"])
+        }`
+      ].join("\n")
+    )
+    .join("\n\n");
+
+  return `${cabecera}\n\n${productos}`;
+}
+
+const CAMPOS_CORRECCION_TICKET = [
+  "Fecha de compra",
+  "Producto",
+  "Producto base",
+  "Categoría",
+  "Monto",
+  "Tienda",
+  "Cantidad",
+  "Unidad",
+  "Precio por unidad"
+];
+
+function camposConDatosTicket(registros) {
+  return CAMPOS_CORRECCION_TICKET.filter(campo =>
+    registros.some(r => !estaVacio(r[campo]))
+  );
+}
+
+function menuCorreccionTicket() {
+  return [
+    "¿Qué quieres corregir?",
+    "",
+    "1. Fecha de compra",
+    "2. Producto",
+    "3. Producto base",
+    "4. Categoría",
+    "5. Precio / Monto",
+    "6. Tienda",
+    "7. Cantidad",
+    "8. Unidad",
+    "9. Precio por unidad",
+    "",
+    "Puedes responder, por ejemplo:",
+    '• "2 y 4"',
+    '• "producto y categoría"',
+    '• "solo precio y tienda están bien"',
+    '• "cancelar"'
+  ].join("\n");
+}
+
+function detectarCamposTicket(texto) {
+  const t = normalizar(texto);
+
+  if (t.includes("cancelar") || t.includes("cancela")) {
+    return {
+      accion: "cancelar",
+      campos: []
+    };
+  }
+
+  if (
+    t.includes("todo bien") ||
+    t.includes("ya esta bien")
+  ) {
+    return {
+      accion: "confirmar",
+      campos: []
+    };
+  }
+
+  const campos = new Set();
+
+  const numeroACampo = {
+    1: "Fecha de compra",
+    2: "Producto",
+    3: "Producto base",
+    4: "Categoría",
+    5: "Monto",
+    6: "Tienda",
+    7: "Cantidad",
+    8: "Unidad",
+    9: "Precio por unidad"
+  };
+
+  const numeros =
+    t.match(/\b[1-9]\b/g) || [];
+
+  numeros.forEach(n =>
+    campos.add(
+      numeroACampo[Number(n)]
+    )
+  );
+
+  if (t.includes("fecha")) {
+    campos.add("Fecha de compra");
+  }
+
+  if (
+    t.includes("producto base") ||
+    t.includes("nombre base")
+  ) {
+    campos.add("Producto base");
+  }
+
+  const sinProductoBase = t
+    .replace(/producto base/g, "")
+    .replace(/nombre base/g, "");
+
+  if (
+    sinProductoBase.includes("producto")
+  ) {
+    campos.add("Producto");
+  }
+
+  if (t.includes("categoria")) {
+    campos.add("Categoría");
+  }
+
+  if (t.includes("tienda")) {
+    campos.add("Tienda");
+  }
+
+  if (t.includes("cantidad")) {
+    campos.add("Cantidad");
+  }
+
+  const mencionaPrecioUnidad =
+    t.includes("precio por unidad") ||
+    t.includes("precio unitario") ||
+    t.includes("unitario");
+
+  if (mencionaPrecioUnidad) {
+    campos.add("Precio por unidad");
+  }
+
+  if (
+    t.includes("monto") ||
+    t.includes("precio total") ||
+    (
+      t.includes("precio") &&
+      !mencionaPrecioUnidad
+    )
+  ) {
+    campos.add("Monto");
+  }
+
+  if (
+    t.includes("unidad") &&
+    !mencionaPrecioUnidad
+  ) {
+    campos.add("Unidad");
+  }
+
+  const hablaDeCorrectos =
+    t.includes("estan bien") ||
+    t.includes("esta bien") ||
+    t.includes("correctos") ||
+    t.includes("correcto");
+
+  return {
+    accion:
+      hablaDeCorrectos
+        ? "correctos"
+        : "corregir",
+
+    campos:
+      [...campos].filter(Boolean)
+  };
+}
+
+function etiquetaCampoTicket(campo) {
+  if (campo === "Monto") {
+    return "Precio / Monto";
+  }
+
+  return campo;
+}
+
+function preguntaCorreccionCampo(
+  campo,
+  registros
+) {
+  if (campo === "Fecha de compra") {
+    return '¿Cuál es la fecha correcta? Puedes decir "hoy" o escribirla como 16/08/2026.';
+  }
+
+  if (campo === "Tienda") {
+    return (
+      `Tienda actual: ${
+        valorTicket(
+          registros[0]?.Tienda
+        )
+      }\n` +
+      "¿Cuál es la tienda correcta?"
+    );
+  }
+
+  const actuales =
+    registros
+      .map(
+        (r, i) =>
+          `${i + 1}. ${
+            valorTicket(
+              r[campo],
+              campo === "Monto" ||
+              campo === "Precio por unidad"
+                ? "dinero"
+                : "texto"
+            )
+          }`
+      )
+      .join("\n");
+
+  if (registros.length === 1) {
+    return (
+      `${etiquetaCampoTicket(campo)} actual: ` +
+      `${valorTicket(
+        registros[0]?.[campo],
+        campo === "Monto" ||
+        campo === "Precio por unidad"
+          ? "dinero"
+          : "texto"
+      )}\n` +
+      "¿Cuál debe ser?"
+    );
+  }
+
+  return [
+    `Vamos a corregir: ${etiquetaCampoTicket(campo)}`,
+    "",
+    actuales,
+    "",
+    "Escribe los valores correctos, uno por línea y en el mismo orden.",
+    'Si alguno debe quedarse igual, escribe "igual" en esa línea.'
+  ].join("\n");
+}
+
+function extraerListaCorreccion(
+  texto,
+  cantidad
+) {
+  let valores =
+    String(texto || "")
+      .split(/\n|;/)
+      .map(v => v.trim())
+      .filter(Boolean)
+      .map(v =>
+        v
+          .replace(
+            /^\s*\d+\s*[.\)\-:]\s*/,
+            ""
+          )
+          .trim()
+      );
+
+  if (
+    cantidad > 1 &&
+    valores.length === 1
+  ) {
+    const numerados =
+      String(texto || "")
+        .split(
+          /(?=\b\d+\s*[.\)\-:]\s*)/
+        )
+        .map(v => v.trim())
+        .filter(Boolean)
+        .map(v =>
+          v
+            .replace(
+              /^\s*\d+\s*[.\)\-:]\s*/,
+              ""
+            )
+            .trim()
+        );
+
+    if (numerados.length > 1) {
+      valores = numerados;
+    }
+  }
+
+  return valores;
+}
+
+function numeroTicketSeguro(texto) {
+  let s =
+    String(texto || "")
+      .trim()
+      .replace(/\s/g, "");
+
+  if (!s) return null;
+
+  s =
+    s.replace(/\$/g, "");
+
+  if (
+    s.includes(",") &&
+    s.includes(".")
+  ) {
+    s =
+      s.replace(/,/g, "");
+
+  } else if (s.includes(",")) {
+    const partes =
+      s.split(",");
+
+    if (
+      partes.length === 2 &&
+      partes[1].length <= 2
+    ) {
+      s =
+        `${partes[0]}.${partes[1]}`;
+
+    } else {
+      s =
+        s.replace(/,/g, "");
+    }
+  }
+
+  const m =
+    s.match(
+      /-?\d+(?:\.\d+)?/
+    );
+
+  if (!m) return null;
+
+  const n =
+    Number(m[0]);
+
+  return Number.isFinite(n)
+    ? n
+    : null;
+}
+
+function siguienteCorreccionTicket(
+  remitente,
+  registros,
+  camposPendientes
+) {
+  if (!camposPendientes.length) {
+    guardarSesion(
+      remitente,
+      {
+        tipo:
+          "ticket_super_confirmacion",
+
+        registros
+      }
+    );
+
+    return (
+      "Así quedaría el ticket:\n\n" +
+      resumenTicketSuper(
+        registros
+      ) +
+      "\n\n¿Está correcto? Responde sí o no."
+    );
+  }
+
+  const [
+    campoActual,
+    ...restantes
+  ] =
+    camposPendientes;
+
+  guardarSesion(
+    remitente,
+    {
+      tipo:
+        "ticket_super_corrigiendo",
+
+      registros,
+
+      campoActual,
+
+      camposPendientes:
+        restantes
+    }
+  );
+
+  return preguntaCorreccionCampo(
+    campoActual,
+    registros
+  );
+}
+
+async function aplicarCorreccionTicket(
+  textoUsuario,
+  campo,
+  registros
+) {
+  const nuevos =
+    registros.map(
+      r => ({
+        ...r
+      })
+    );
+
+  const t =
+    normalizar(
+      textoUsuario
+    );
+
+  if (
+    [
+      "igual",
+      "dejar igual",
+      "sin cambio",
+      "dejalo"
+    ].includes(t)
+  ) {
+    return nuevos;
+  }
+
+  if (
+    campo ===
+    "Fecha de compra"
+  ) {
+    const interpretacion =
+      await interpretarConGemini(
+        `La fecha de compra correcta es ${textoUsuario}`,
+        {
+          sheet:
+            "Super",
+
+          data:
+            nuevos[0]
+        }
+      );
+
+    const f =
+      interpretacion.data?.[
+        "Fecha de compra"
+      ];
+
+    if (estaVacio(f)) {
+      throw new Error(
+        "No pude interpretar esa fecha."
+      );
+    }
+
+    nuevos.forEach(
+      r =>
+        r[
+          "Fecha de compra"
+        ] = f
+    );
+
+    return nuevos;
+  }
+
+  if (
+    campo ===
+    "Tienda"
+  ) {
+    const tienda =
+      String(
+        textoUsuario ||
+        ""
+      ).trim();
+
+    if (!tienda) {
+      throw new Error(
+        "La tienda no puede quedar vacía."
+      );
+    }
+
+    nuevos.forEach(
+      r =>
+        r.Tienda =
+          tienda
+    );
+
+    return nuevos;
+  }
+
+  const valores =
+    extraerListaCorreccion(
+      textoUsuario,
+      nuevos.length
+    );
+
+  if (
+    nuevos.length > 1 &&
+    valores.length !==
+      nuevos.length
+  ) {
+    throw new Error(
+      `Necesito ${nuevos.length} valores, uno por cada producto.`
+    );
+  }
+
+  if (
+    nuevos.length === 1 &&
+    valores.length === 0
+  ) {
+    throw new Error(
+      "No recibí el nuevo valor."
+    );
+  }
+
+  const numerico =
+    [
+      "Monto",
+      "Cantidad",
+      "Precio por unidad"
+    ].includes(
+      campo
+    );
+
+  nuevos.forEach(
+    (r, i) => {
+      const valor =
+        valores[
+          nuevos.length === 1
+            ? 0
+            : i
+        ];
+
+      const nv =
+        normalizar(
+          valor
+        );
+
+      if (
+        [
+          "igual",
+          "dejar igual",
+          "sin cambio"
+        ].includes(nv)
+      ) {
+        return;
+      }
+
+      if (numerico) {
+        const n =
+          numeroTicketSeguro(
+            valor
+          );
+
+        if (n === null) {
+          throw new Error(
+            `No pude interpretar el valor ${i + 1} como número.`
+          );
+        }
+
+        r[campo] =
+          n;
+
+      } else {
+        r[campo] =
+          String(
+            valor || ""
+          ).trim();
+      }
+
+      if (
+        (
+          campo === "Monto" ||
+          campo === "Cantidad"
+        ) &&
+        valorNumero(
+          r.Monto
+        ) > 0 &&
+        valorNumero(
+          r.Cantidad
+        ) > 0
+      ) {
+        r[
+          "Precio por unidad"
+        ] =
+          Math.round(
+            (
+              valorNumero(
+                r.Monto
+              ) /
+              valorNumero(
+                r.Cantidad
+              )
+            ) *
+            100
+          ) /
+          100;
+      }
+    }
+  );
+
+  return nuevos;
+}
+
+async function procesarImagenRecibida(
+  mensaje,
+  remitente
+) {
+  const mediaId =
+    mensaje.image?.id;
+
+  if (!mediaId) {
+    return (
+      "No pude identificar la imagen."
+    );
+  }
+
+  const media =
+    await obtenerMediaWhatsApp(
+      mediaId
+    );
+
+  const analisis =
+    await interpretarImagen(
+      media.buffer,
+      media.mimeType
+    );
+
+  if (
+    analisis.accion ===
+    "ticket_pago"
+  ) {
+    const data =
+      completarDatosCalculados(
+        "Pagos",
+        analisis.data || {},
+        "Foto de recibo recibida por WhatsApp"
+      );
+
+    return prepararConfirmacionRegistro(
+      remitente,
+      "Pagos",
+      data,
+      "Foto de recibo recibida por WhatsApp"
+    );
+  }
+
+  if (
+    analisis.accion ===
+    "ticket_super"
+  ) {
+    const items =
+      Array.isArray(
+        analisis.items
+      )
+        ? analisis.items
+        : [];
+
+    const registros =
+      items
+        .filter(
+          item =>
+            !estaVacio(
+              item.Producto
+            ) &&
+            !estaVacio(
+              item.Monto
+            )
+        )
+        .map(
+          item =>
+            limpiarItemTicket(
+              item,
+              analisis
+            )
+        );
+
+    if (
+      registros.length === 0
+    ) {
+      return (
+        "Pude ver el ticket, pero no pude leer con suficiente seguridad los productos y sus precios. " +
+        "Puedes mandarme una foto más clara o dictarme los datos."
+      );
+    }
+
+    if (
+      registros.some(
+        r =>
+          estaVacio(
+            r[
+              "Fecha de compra"
+            ]
+          )
+      )
+    ) {
+      guardarSesion(
+        remitente,
+        {
+          tipo:
+            "ticket_super_fecha",
+
+          registros
+        }
+      );
+
+      return (
+        `Pude leer ${registros.length} producto(s), pero no alcanzo a ver bien la fecha.\n` +
+        "¿Qué fecha le pongo?"
+      );
+    }
+
+    if (
+      registros.some(
+        r =>
+          estaVacio(
+            r.Tienda
+          )
+      )
+    ) {
+      guardarSesion(
+        remitente,
+        {
+          tipo:
+            "ticket_super_tienda",
+
+          registros
+        }
+      );
+
+      return (
+        `Pude leer ${registros.length} producto(s), pero no alcanzo a identificar bien la tienda.\n` +
+        "¿En qué tienda fue?"
+      );
+    }
+
+    guardarSesion(
+      remitente,
+      {
+        tipo:
+          "ticket_super_confirmacion",
+
+        registros
+      }
+    );
+
+    return (
+      "Del ticket voy a registrar esto:\n\n" +
+      resumenTicketSuper(
+        registros
+      ) +
+      "\n\n¿Está correcto? Responde sí o no."
+    );
+  }
+
+  return (
+    "No pude identificar con seguridad si la imagen es un ticket del súper o un recibo de pago." +
+    (
+      analisis.descripcion
+        ? `\n\nAlcancé a ver: ${analisis.descripcion}`
+        : ""
+    ) +
+    "\n\nDime si quieres registrarlo en Súper o en Pagos."
+  );
+}
+
 async function procesarTicketPendiente(
   textoUsuario,
   remitente,
   sesion
 ) {
-  if (
-    respuestaNo(
+  const t =
+    normalizar(
       textoUsuario
-    ) &&
-    sesion.tipo ===
-      "ticket_super_confirmacion"
-  ) {
-    sesiones.delete(
-      remitente
     );
-
-    return (
-      "No guardé nada del ticket."
-    );
-  }
 
   if (
     sesion.tipo ===
@@ -3925,16 +4695,16 @@ async function procesarTicketPendiente(
         }
       );
 
-    const fecha =
+    const f =
       interpretacion.data?.[
         "Fecha de compra"
       ];
 
     if (
-      estaVacio(fecha)
+      estaVacio(f)
     ) {
       return (
-        "No pude interpretar esa fecha. Dímela otra vez, por ejemplo: hoy o 16/08/2026."
+        'No pude interpretar esa fecha. Dímela otra vez, por ejemplo: "hoy" o "16/08/2026".'
       );
     }
 
@@ -3942,8 +4712,9 @@ async function procesarTicketPendiente(
       sesion.registros.map(
         r => ({
           ...r,
+
           "Fecha de compra":
-            fecha
+            f
         })
       );
 
@@ -3995,7 +4766,8 @@ async function procesarTicketPendiente(
   ) {
     const tienda =
       String(
-        textoUsuario
+        textoUsuario ||
+        ""
       ).trim();
 
     if (!tienda) {
@@ -4008,6 +4780,7 @@ async function procesarTicketPendiente(
       sesion.registros.map(
         r => ({
           ...r,
+
           Tienda:
             tienda
         })
@@ -4037,39 +4810,222 @@ async function procesarTicketPendiente(
     "ticket_super_confirmacion"
   ) {
     if (
-      !respuestaSi(
+      respuestaSi(
         textoUsuario
       )
     ) {
-      return (
-        "Responde sí si el ticket está correcto o no para cancelar."
-      );
-    }
+      const ids = [];
 
-    const ids = [];
+      for (
+        const registro
+        of sesion.registros
+      ) {
+        const resultado =
+          await guardarEnSheets(
+            "Super",
+            registro
+          );
 
-    for (
-      const registro
-      of sesion.registros
-    ) {
-      const resultado =
-        await guardarEnSheets(
-          "Super",
-          registro
+        ids.push(
+          resultado.id
         );
+      }
 
-      ids.push(
-        resultado.id
+      sesiones.delete(
+        remitente
+      );
+
+      return (
+        `Listo. Guardé ${ids.length} producto(s) del ticket.\n` +
+        `IDs: ${ids.join(", ")}`
       );
     }
 
-    sesiones.delete(
-      remitente
-    );
+    if (
+      respuestaNo(
+        textoUsuario
+      )
+    ) {
+      guardarSesion(
+        remitente,
+        {
+          tipo:
+            "ticket_super_elegir_correccion",
+
+          registros:
+            sesion.registros
+        }
+      );
+
+      return (
+        menuCorreccionTicket()
+      );
+    }
 
     return (
-      `Listo. Guardé ${ids.length} producto(s) del ticket.\n` +
-      `IDs: ${ids.join(", ")}`
+      "Responde sí si todo está correcto o no si quieres corregir algo."
+    );
+  }
+
+  if (
+    sesion.tipo ===
+    "ticket_super_elegir_correccion"
+  ) {
+    const seleccion =
+      detectarCamposTicket(
+        textoUsuario
+      );
+
+    if (
+      seleccion.accion ===
+      "cancelar"
+    ) {
+      sesiones.delete(
+        remitente
+      );
+
+      return (
+        "No guardé nada del ticket."
+      );
+    }
+
+    if (
+      seleccion.accion ===
+      "confirmar"
+    ) {
+      guardarSesion(
+        remitente,
+        {
+          tipo:
+            "ticket_super_confirmacion",
+
+          registros:
+            sesion.registros
+        }
+      );
+
+      return (
+        "Perfecto. Revisa una última vez:\n\n" +
+        resumenTicketSuper(
+          sesion.registros
+        ) +
+        "\n\n¿Está correcto? Responde sí o no."
+      );
+    }
+
+    if (
+      !seleccion.campos.length
+    ) {
+      return (
+        menuCorreccionTicket()
+      );
+    }
+
+    let campos;
+
+    if (
+      seleccion.accion ===
+      "correctos"
+    ) {
+      const disponibles =
+        camposConDatosTicket(
+          sesion.registros
+        );
+
+      campos =
+        disponibles.filter(
+          c =>
+            !seleccion.campos.includes(
+              c
+            )
+        );
+
+    } else {
+      campos =
+        seleccion.campos;
+    }
+
+    campos =
+      CAMPOS_CORRECCION_TICKET
+        .filter(
+          c =>
+            campos.includes(
+              c
+            )
+        );
+
+    if (
+      !campos.length
+    ) {
+      guardarSesion(
+        remitente,
+        {
+          tipo:
+            "ticket_super_confirmacion",
+
+          registros:
+            sesion.registros
+        }
+      );
+
+      return (
+        "Entonces no tengo nada más que corregir. Revisa una última vez:\n\n" +
+        resumenTicketSuper(
+          sesion.registros
+        ) +
+        "\n\n¿Está correcto? Responde sí o no."
+      );
+    }
+
+    return siguienteCorreccionTicket(
+      remitente,
+      sesion.registros,
+      campos
+    );
+  }
+
+  if (
+    sesion.tipo ===
+    "ticket_super_corrigiendo"
+  ) {
+    if (
+      t === "cancelar" ||
+      t === "cancela"
+    ) {
+      sesiones.delete(
+        remitente
+      );
+
+      return (
+        "No guardé nada del ticket."
+      );
+    }
+
+    let registros;
+
+    try {
+      registros =
+        await aplicarCorreccionTicket(
+          textoUsuario,
+          sesion.campoActual,
+          sesion.registros
+        );
+
+    } catch (error) {
+      return (
+        `${error.message}\n\n` +
+        preguntaCorreccionCampo(
+          sesion.campoActual,
+          sesion.registros
+        )
+      );
+    }
+
+    return siguienteCorreccionTicket(
+      remitente,
+      registros,
+      sesion.camposPendientes ||
+        []
     );
   }
 
@@ -4081,7 +5037,6 @@ async function procesarTicketPendiente(
     "Cancelé la lectura del ticket."
   );
 }
-
 async function procesarAudioRecibido(
   mensaje,
   remitente
