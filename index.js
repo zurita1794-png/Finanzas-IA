@@ -3814,7 +3814,16 @@ function limpiarItemTicket(
 
     Notas:
       "",
+"Registro de mensaje enviado":
+  "Foto de ticket recibida por WhatsApp"
+};
 
+return completarDatosCalculados(
+  "Super",
+  data,
+  "Foto de ticket recibida por WhatsApp"
+);
+}
 
 async function procesarImagenRecibida(
   mensaje,
