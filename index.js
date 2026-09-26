@@ -2650,7 +2650,6 @@ async function iniciarMetaAhorro(
       textoOriginal ||
       ""
   };
-
   guardarSesion(
     remitente,
     {
@@ -2659,7 +2658,74 @@ async function iniciarMetaAhorro(
 
       datos
     }
-  );async function procesarEliminacionConfirmacion(
+  );
+
+  return [
+    "🎯 *Nueva meta*",
+    SEPARADOR,
+    `Meta: ${datos.Meta}`,
+    `Objetivo: ${formatearDinero(
+      datos[
+        "Monto objetivo"
+      ]
+    )}`,
+    `Fecha: ${
+      datos[
+        "Fecha objetivo"
+      ]
+    }`,
+    "",
+    "¿Está correcto?",
+    "✅ Sí",
+    "❌ No"
+  ].join("\n");
+}
+
+async function procesarMetaConfirmacion(
+  textoUsuario,
+  remitente,
+  sesion
+) {
+  if (
+    respuestaNo(
+      textoUsuario
+    )
+  ) {
+    sesiones.delete(
+      remitente
+    );
+
+    return (
+      "No guardé la meta."
+    );
+  }
+
+  if (
+    !respuestaSi(
+      textoUsuario
+    )
+  ) {
+    return (
+      "Responde *sí* para crear la meta o *no* para cancelar."
+    );
+  }
+
+  const resultado =
+    await guardarMeta(
+      sesion.datos
+    );
+
+  sesiones.delete(
+    remitente
+  );
+
+  return (
+    `✅ Meta creada con ID *${resultado.id}*.`
+  );
+}
+
+async function procesarEliminacionConfirmacion(
+   
   textoUsuario,
   remitente,
   sesion
