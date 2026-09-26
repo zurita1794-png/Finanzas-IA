@@ -1001,6 +1001,136 @@ async function transcribirAudio(
       false
   });
 }
+async function interpretarImagen(
+  buffer,
+  mimeType
+) {
+  const systemInstruction = `
+Analiza una foto enviada a Finanzas IA.
+
+RESPONDE ÚNICAMENTE JSON VÁLIDO.
+
+Fecha actual:
+${fechaActualMexico()}
+
+Si es ticket de supermercado:
+
+{
+  "accion": "ticket_super",
+  "tienda": "",
+  "fecha": "",
+  "total": 0,
+  "items": [
+    {
+      "Producto": "",
+      "Producto base": "",
+      "Categoría": "",
+      "Monto": 0,
+      "Cantidad": "",
+      "Unidad": "",
+      "Contenido por empaque": "",
+      "Unidad de comparación": "",
+      "Precio por unidad": ""
+    }
+  ]
+}
+
+REGLAS:
+
+- Extrae solo lo visible o inferible con seguridad.
+- No inventes.
+- Producto conserva marca o presentación cuando pueda identificarse.
+- Producto base es el tipo general.
+- Categoría es el grupo general.
+- Cantidad es cuántos empaques completos se compraron.
+- Unidad es paquete, caja, bolsa, botella, lata, pieza, etc.
+- Contenido por empaque se expresa en una unidad práctica de comparación.
+
+Ejemplos:
+
+12 rollos:
+Contenido por empaque = 12
+Unidad de comparación = rollo
+
+600 ml:
+Contenido por empaque = 0.6
+Unidad de comparación = litro
+
+750 g:
+Contenido por empaque = 0.75
+Unidad de comparación = kilogramo
+
+- Si no estás seguro de presentación, cantidad, unidad o contenido, déjalos vacíos.
+- Deja Precio por unidad vacío.
+- El sistema lo calculará.
+- Fecha debe ser DD/MM/AAAA.
+- Si no se ve, déjala vacía.
+- Si no se identifica la tienda, déjala vacía.
+
+Si es recibo o comprobante de pago:
+
+{
+  "accion": "ticket_pago",
+  "data": {
+    "Fecha de pago": "",
+    "Concepto": "",
+    "Periodo": "",
+    "Monto": "",
+    "Estado": ""
+  }
+}
+
+- Si prueba que ya fue pagado:
+Estado = Pagado.
+
+- Si no demuestra pago:
+deja Estado vacío.
+
+Si no puedes clasificarlo:
+
+{
+  "accion": "imagen_desconocida",
+  "descripcion": "qué alcanzas a leer"
+}
+`.trim();
+
+  const texto =
+    await llamadaGemini({
+      systemInstruction,
+
+      parts: [
+        {
+          inline_data: {
+            mime_type:
+              mimeType ||
+              "image/jpeg",
+
+            data:
+              buffer.toString(
+                "base64"
+              )
+          }
+        },
+
+        {
+          text:
+            "Extrae la información financiera siguiendo exactamente el esquema."
+        }
+      ],
+
+      jsonMode:
+        true
+    });
+
+  console.log(
+    "JSON imagen Gemini:",
+    texto
+  );
+
+  return extraerJSON(
+    texto
+  );
+}
 function combinarDatos(
   anteriores,
   nuevos
