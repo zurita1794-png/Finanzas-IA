@@ -969,6 +969,38 @@ async function llamadaGemini({
 
   return texto;
 }
+async function transcribirAudio(
+  buffer,
+  mimeType
+) {
+  return llamadaGemini({
+    systemInstruction:
+      "Transcribe este audio en español de forma fiel. Devuelve únicamente el texto transcrito, sin comentarios.",
+
+    parts: [
+      {
+        inline_data: {
+          mime_type:
+            mimeType ||
+            "audio/ogg",
+
+          data:
+            buffer.toString(
+              "base64"
+            )
+        }
+      },
+
+      {
+        text:
+          "Conserva números, fechas, nombres de tiendas y cantidades con precisión."
+      }
+    ],
+
+    jsonMode:
+      false
+  });
+}
 function combinarDatos(
   anteriores,
   nuevos
