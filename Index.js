@@ -7240,7 +7240,14 @@ async function procesarMensaje(
       await interpretarConGemini(
         texto
       );
-
+console.log(
+  "INTERPRETACION GEMINI:",
+  JSON.stringify(
+    interpretacion,
+    null,
+    2
+  )
+);
   } catch (
     error
   ) {
