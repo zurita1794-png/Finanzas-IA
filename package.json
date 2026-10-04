@@ -1,8 +1,8 @@
 {
   "name": "finanzas-ia",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "Index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node Index.js"
   }
 }
