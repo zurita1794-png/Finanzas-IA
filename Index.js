@@ -10177,7 +10177,7 @@ if (
 
     const resultado =
       await llamarAppsScript({
-        action: "sistema_estructura"
+       action: "super_ver_lista"
       });
 
     responderJSON(
