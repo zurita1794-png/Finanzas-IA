@@ -10164,7 +10164,57 @@ const servidor =
             req.url,
             `http://${req.headers.host || "localhost"}`
           );
+// ==================================
+// PRUEBA — APPS SCRIPT
+// ==================================
 
+if (
+  req.method === "GET" &&
+  url.pathname === "/test-apps-script"
+) {
+
+  try {
+
+    const resultado =
+      await llamarAppsScript({
+        action: "sistema_estructura"
+      });
+
+    responderJSON(
+      res,
+      200,
+      {
+        ok: true,
+        origen: "Render",
+        destino: "Apps Script",
+        resultado
+      }
+    );
+
+  } catch (error) {
+
+    console.error(
+      "Error en prueba Apps Script:",
+      error
+    );
+
+    responderJSON(
+      res,
+      500,
+      {
+        ok: false,
+        error:
+          error.message,
+        detalles:
+          error.details ||
+          null
+      }
+    );
+
+  }
+
+  return;
+}
 
         // ==================================
         // HEALTH CHECK
