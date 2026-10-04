@@ -9513,7 +9513,11 @@ async function procesarEntradaWhatsApp(
 
   const remitente =
     mensaje?.from;
-
+  
+console.log(
+  "DESTINATARIO RECIBIDO DE META:",
+  remitente
+);
   const messageId =
     mensaje?.id;
 
