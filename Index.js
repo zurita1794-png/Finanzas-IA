@@ -727,7 +727,12 @@ async function enviarMensajeWhatsApp(
     of mensajes
   ) {
 
-    const respuesta =
+    let destinatario =
+      String(
+        remitente || ""
+      ).trim();
+
+    let respuesta =
       await fetch(
         `https://graph.facebook.com/${GRAPH_VERSION}/${PHONE_NUMBER_ID}/messages`,
         {
@@ -748,7 +753,7 @@ async function enviarMensajeWhatsApp(
                 "whatsapp",
 
               to:
-                remitente,
+                destinatario,
 
               type:
                 "text",
@@ -764,12 +769,102 @@ async function enviarMensajeWhatsApp(
         }
       );
 
-    const datos =
+    let datos =
       await respuesta
         .json()
         .catch(
           () => ({})
         );
+
+    /*
+     * México:
+     *
+     * Meta puede entregar el número móvil mexicano
+     * desde el webhook con formato 521XXXXXXXXXX,
+     * mientras que el destinatario autorizado puede
+     * estar registrado como 52XXXXXXXXXX.
+     *
+     * Si Meta devuelve 131030, probamos la variante
+     * sin el "1" después de 52.
+     */
+
+    if (
+      !respuesta.ok &&
+      datos?.error?.code === 131030 &&
+      /^521\d{10}$/.test(
+        destinatario
+      )
+    ) {
+
+      const varianteMexico =
+        "52" +
+        destinatario.slice(
+          3
+        );
+
+      console.log(
+        "WhatsApp 131030. Reintentando número mexicano:",
+        {
+          original:
+            destinatario,
+
+          variante:
+            varianteMexico
+        }
+      );
+
+      destinatario =
+        varianteMexico;
+
+      respuesta =
+        await fetch(
+          `https://graph.facebook.com/${GRAPH_VERSION}/${PHONE_NUMBER_ID}/messages`,
+          {
+            method:
+              "POST",
+
+            headers: {
+              Authorization:
+                `Bearer ${WHATSAPP_TOKEN}`,
+
+              "Content-Type":
+                "application/json"
+            },
+
+            body:
+              JSON.stringify({
+                messaging_product:
+                  "whatsapp",
+
+                to:
+                  destinatario,
+
+                type:
+                  "text",
+
+                text: {
+                  preview_url:
+                    false,
+
+                  body:
+                    mensaje
+                }
+              })
+          }
+        );
+
+      datos =
+        await respuesta
+          .json()
+          .catch(
+            () => ({})
+          );
+    }
+
+    console.log(
+      "Respuesta WhatsApp:",
+      datos
+    );
 
     if (
       !respuesta.ok
@@ -793,7 +888,6 @@ async function enviarMensajeWhatsApp(
   }
 
 }
-
 // ========================================
 // JSON DE GEMINI
 // ========================================
