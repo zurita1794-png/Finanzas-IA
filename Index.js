@@ -1795,14 +1795,22 @@ const calendarioListar =
     maxResults
   ) =>
     llamarAppsScript({
+
       action:
         "calendar_list",
 
-      timeMin,
-      timeMax,
+      payload: {
 
-      maxResults
+        timeMin,
+
+        timeMax,
+
+        maxResults
+
+      }
+
     });
+
 
 const calendarioBuscar =
   (
@@ -1812,32 +1820,54 @@ const calendarioBuscar =
     maxResults
   ) =>
     llamarAppsScript({
+
       action:
         "calendar_search",
 
-      buscar,
-      timeMin,
-      timeMax,
+      payload: {
 
-      maxResults
+        buscar,
+
+        timeMin,
+
+        timeMax,
+
+        maxResults
+
+      }
+
     });
+
 
 const calendarioCrear =
   data =>
     llamarAppsScript({
+
       action:
         "calendar_create",
 
-      data
+      payload: {
+
+        data
+
+      }
+
     });
+
 
 const calendarioEliminarEvento =
   eventId =>
     llamarAppsScript({
+
       action:
         "calendar_delete",
 
-      eventId
+      payload: {
+
+        eventId
+
+      }
+
     });
 
 
