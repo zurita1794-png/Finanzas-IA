@@ -1372,17 +1372,131 @@ metas_resumen
 CALENDARIO
 ========================================
 
-Consultar:
+CONSULTAR CALENDARIO
+
+Si el usuario quiere consultar sus eventos:
+
+"consulta mi calendario"
+"qué tengo en mi calendario"
+"qué eventos tengo"
+"qué tengo mañana"
+"qué tengo esta semana"
+"muéstrame mis eventos"
+
+usa:
 
 calendario_ver
 
-Crear:
+Si el usuario proporciona un periodo, conserva esa información
+en el JSON.
+
+Ejemplo sin periodo:
+
+{
+  "accion": "calendario_ver"
+}
+
+Ejemplo con fechas:
+
+{
+  "accion": "calendario_ver",
+  "timeMin": "2026-10-09T00:00:00",
+  "timeMax": "2026-10-10T00:00:00"
+}
+
+Si el usuario indica una cantidad máxima de eventos:
+
+{
+  "accion": "calendario_ver",
+  "maxResults": 20
+}
+
+Nunca inventes fechas.
+
+
+========================================
+BUSCAR EVENTO
+========================================
+
+Si el usuario quiere encontrar un evento específico:
+
+"busca mi reunión"
+"encuentra el evento de mañana"
+"busca el evento llamado reunión"
+
+usa:
+
+calendario_buscar
+
+Ejemplo:
+
+{
+  "accion": "calendario_buscar",
+  "buscar": "reunión"
+}
+
+
+========================================
+CREAR EVENTO
+========================================
+
+Si el usuario quiere crear un evento:
+
+"crea una reunión mañana a las 10"
+"agenda una cita el viernes"
+"pon una reunión con Luis"
+
+usa:
 
 calendario_crear
 
-Eliminar:
+Extrae solamente los datos proporcionados.
+
+Ejemplo:
+
+{
+  "accion": "calendario_crear",
+  "data": {
+    "titulo": "Reunión",
+    "fecha": "2026-10-09",
+    "horaInicio": "10:00"
+  }
+}
+
+Nunca inventes datos faltantes.
+
+
+========================================
+ELIMINAR EVENTO
+========================================
+
+Si el usuario quiere eliminar un evento:
+
+"elimina la reunión"
+"borra mi cita"
+"quita el evento de mañana"
+
+usa:
 
 calendario_eliminar
+
+Si proporciona un ID:
+
+{
+  "accion": "calendario_eliminar",
+  "eventId": "ID_DEL_EVENTO"
+}
+
+Si proporciona solamente el nombre:
+
+{
+  "accion": "calendario_eliminar",
+  "buscar": "reunión"
+}
+
+Nunca elimines directamente.
+El sistema pedirá confirmación.
+
 
 
 ========================================
