@@ -6674,7 +6674,7 @@ async function ejecutarAnalisisSuper(
 // PROCESAMIENTO DE SESIONES
 // ========================================
 
-async function procesarSesionPendiente(
+async function procesarSesionPendienteOriginal(
   textoUsuario,
   remitente,
   sesion
@@ -9665,9 +9665,6 @@ async function procesarTicketNuevosConfirmacionCompleta(
 // ========================================
 // AGREGAR TIPOS DE SESIÓN DEL TICKET
 // ========================================
-
-const procesarSesionPendienteOriginal =
-  procesarSesionPendiente;
 
 async function procesarSesionPendiente(
   textoUsuario,
