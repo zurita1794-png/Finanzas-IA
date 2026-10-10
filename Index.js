@@ -1673,8 +1673,36 @@ async function interpretarConGemini(
   texto
 ) {
 
+  const ahora = new Date();
+
+  const hoyISO =
+    ahora.toLocaleDateString(
+      "en-CA",
+      { timeZone: "America/Mexico_City" }
+    );
+
+  const hoyTexto =
+    ahora.toLocaleDateString(
+      "es-MX",
+      {
+        timeZone: "America/Mexico_City",
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric"
+      }
+    );
+
   const prompt = [
     instruccionesFinanzas(),
+
+    "",
+
+    "FECHA ACTUAL (zona America/Mexico_City):",
+    `Hoy es ${hoyTexto} (${hoyISO}).`,
+    "Usa esta fecha como referencia para 'hoy', 'mañana', 'esta semana', 'este mes', etc.",
+    "Nunca inventes otro año ni otra fecha base.",
+    "Para timeMin y timeMax usa formato YYYY-MM-DDTHH:mm:ss sin zona horaria ni 'Z'.",
 
     "",
 
