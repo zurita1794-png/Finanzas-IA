@@ -6552,57 +6552,157 @@ async function iniciarEliminarEvento(
 // SELECCIONAR EVENTO
 // ========================================
 
+function fechaCorta(ymd) {
+
+  const p = partesYMD(ymd);
+
+  return p
+    ? `${p.d} ${MESES_ES[p.m - 1].slice(0, 3)}`
+    : "";
+
+}
+
+
+function resumenEventosEliminar(eventos) {
+
+  const grupos = new Map();
+
+  for (const e of eventos) {
+
+    const titulo =
+      e.titulo || e.title || e.Titulo || "Evento";
+
+    const inicio =
+      e.inicio || e.start || e.fecha || "";
+
+    if (!grupos.has(titulo)) grupos.set(titulo, []);
+
+    grupos.get(titulo).push(fechaMX(inicio));
+
+  }
+
+  return [...grupos.entries()]
+    .map(([titulo, fechas]) =>
+      `📅 *${titulo}*\n${textoRangoFechas(fechas)}`
+    )
+    .join("\n\n");
+
+}
+
+
+function parsearSeleccion(texto, total) {
+
+  const t = String(texto || "").toLowerCase();
+
+  if (/\b(todos|todas|todo)\b/.test(t)) {
+
+    return Array.from(
+      { length: total },
+      (_, i) => i + 1
+    );
+
+  }
+
+  const elegidos = new Set();
+
+  // Rangos: "3-5", "3 al 5", "del 3 hasta 5"
+  const sinRangos = t.replace(
+    /(\d+)\s*(?:al|a|hasta|-)\s*(\d+)/g,
+    (_, a, b) => {
+
+      let ini = Number(a);
+      let fin = Number(b);
+
+      if (ini > fin) [ini, fin] = [fin, ini];
+
+      for (let n = ini; n <= fin; n++) elegidos.add(n);
+
+      return " ";
+
+    }
+  );
+
+  (sinRangos.match(/\d+/g) || [])
+    .forEach(n => elegidos.add(Number(n)));
+
+  return [...elegidos].sort((a, b) => a - b);
+
+}
+
+
 async function procesarCalendarioEliminarSeleccion(
   textoUsuario,
   remitente,
   sesion
 ) {
 
-  const match =
-    String(
+  if (
+    respuestaNo(
       textoUsuario
-    ).match(
-      /\d+/
+    )
+  ) {
+
+    sesiones.delete(
+      remitente
     );
 
-  if (!match) {
-
-    return `Responde con un número del 1 al ${sesion.eventos.length}.`;
+    return (
+      "❌ No eliminé nada."
+    );
 
   }
 
-  const numero =
-    Number(
-      match[0]
+  const total =
+    sesion.eventos.length;
+
+  const numeros =
+    parsearSeleccion(
+      textoUsuario,
+      total
     );
 
   if (
-    numero < 1 ||
-    numero >
-      sesion.eventos.length
+    !numeros.length
   ) {
 
-    return `Elige un número del 1 al ${sesion.eventos.length}.`;
+    return `Responde con números del 1 al ${total} (ej. 1, 3 o 2-5), o *todos*.`;
 
   }
 
-  const evento =
-    sesion.eventos[
-      numero - 1
-    ];
+  if (
+    numeros.some(
+      n => n < 1 || n > total
+    )
+  ) {
 
-  const id =
-    evento.eventId ||
-    evento.id ||
-    evento.ID;
+    return `Elige números entre 1 y ${total}.`;
 
-  if (!id) {
+  }
+
+  const elegidos =
+    numeros.map(
+      n => sesion.eventos[n - 1]
+    );
+
+  const sinId =
+    elegidos.filter(
+      e => !(e.eventId || e.id || e.ID)
+    );
+
+  if (
+    sinId.length
+  ) {
 
     return (
-      "No pude identificar el ID de ese evento. No eliminé nada."
+      "No pude identificar alguno de esos eventos. No eliminé nada."
     );
 
   }
+
+  const eventIds =
+    elegidos.map(
+      e => e.eventId || e.id || e.ID
+    );
 
   guardarSesion(
     remitente,
@@ -6611,25 +6711,30 @@ async function procesarCalendarioEliminarSeleccion(
         "calendario_eliminar_confirmacion",
 
       eventId:
-        id,
+        eventIds[0],
 
-      evento
+      eventIds,
+
+      evento:
+        elegidos[0],
+
+      eventos:
+        elegidos
     }
   );
 
+  const resumen =
+    elegidos.length === 1
+      ? resumenEvento(elegidos[0])
+      : `🗑️ ${elegidos.length} eventos\n${resumenEventosEliminar(elegidos)}`;
+
   return [
-    "🗑️ *Eliminar evento*",
-    SEPARADOR,
-    resumenEvento(
-      evento
-    ),
+    resumen,
     "",
-    "¿Confirmas que quieres eliminarlo?",
-    "✅ Sí",
-    "❌ No"
-  ]
-    .filter(Boolean)
-    .join("\n");
+    elegidos.length === 1
+      ? "¿Lo elimino? (sí / no)"
+      : "¿Los elimino? (sí / no)"
+  ].join("\n");
 
 }
 
@@ -6655,7 +6760,7 @@ async function procesarEliminarEventoConfirmacion(
     );
 
     return (
-      "❌ No eliminé el evento."
+      "❌ No eliminé nada."
     );
 
   }
@@ -6667,23 +6772,71 @@ async function procesarEliminarEventoConfirmacion(
   ) {
 
     return (
-      "Responde *sí* para eliminar el evento o *no* para cancelar."
+      "Responde *sí* para eliminar o *no* para cancelar."
     );
 
   }
 
-  await calendarioEliminarEvento(
-    sesion.eventId
-  );
+  const ids =
+    Array.isArray(sesion.eventIds) &&
+    sesion.eventIds.length
+      ? sesion.eventIds
+      : [sesion.eventId];
+
+  let eliminados = 0;
+  let fallidos = 0;
+
+  for (const id of ids) {
+
+    try {
+
+      await calendarioEliminarEvento(
+        id
+      );
+
+      eliminados++;
+
+    } catch (error) {
+
+      console.error(
+        "Error eliminando evento:",
+        id,
+        error
+      );
+
+      fallidos++;
+
+    }
+
+  }
 
   sesiones.delete(
     remitente
   );
 
-  return (
-    "✅ *Evento eliminado del calendario.*"
-  );
+  if (
+    eliminados === 0
+  ) {
 
+    return (
+      "⚠️ No pude eliminar. Intenta nuevamente."
+    );
+
+  }
+
+  if (
+    fallidos
+  ) {
+
+    return `✅ Eliminé ${eliminados}. ⚠️ No pude eliminar ${fallidos}.`;
+
+  }
+
+  return eliminados === 1
+    ? "✅ Eliminado"
+    : `✅ Eliminé ${eliminados} eventos`;
+
+}
 }
 // ========================================
 // ANÁLISIS FINANCIERO
