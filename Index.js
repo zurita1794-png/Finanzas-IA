@@ -6466,7 +6466,7 @@ async function iniciarEliminarEvento(
       }
     );
 
-    const lista =
+        const lista =
       eventos.map(
         (evento, indice) => {
 
@@ -6482,9 +6482,14 @@ async function iniciarEliminarEvento(
             evento.fecha ||
             "";
 
-                 return `${indice + 1}. *${titulo}*${
+          const cuando =
             inicio
-              ? ` — ${fechaMX(inicio)}`
+              ? fechaCorta(fechaMX(inicio))
+              : "";
+
+          return `${indice + 1}. ${titulo}${
+            cuando
+              ? ` · ${cuando}`
               : ""
           }`;
 
@@ -6492,12 +6497,11 @@ async function iniciarEliminarEvento(
       );
 
     return [
-      "🗑️ *Encontré varios eventos*",
+      "🗑️ ¿Cuáles elimino?",
       "",
       lista.join("\n"),
       "",
-      "¿Cuál quieres eliminar?",
-      "Responde con el número."
+      "Responde con números (1, 3 o 2-5) o *todos*."
     ].join("\n");
 
   }
