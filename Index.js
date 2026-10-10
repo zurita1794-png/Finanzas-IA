@@ -6837,7 +6837,6 @@ async function procesarEliminarEventoConfirmacion(
     : `✅ Eliminé ${eliminados} eventos`;
 
 }
-}
 // ========================================
 // ANÁLISIS FINANCIERO
 // ========================================
