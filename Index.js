@@ -5999,7 +5999,83 @@ async function iniciarCrearEvento(
 // ========================================
 // CONFIRMAR CREACIÓN
 // ========================================
+// ========================================
+// COMPLETAR DATOS FALTANTES DE EVENTO
+// ========================================
 
+async function procesarDatosFaltantesCalendario(
+  textoUsuario,
+  remitente,
+  sesion
+) {
+
+  if (
+    respuestaNo(
+      textoUsuario
+    )
+  ) {
+
+    sesiones.delete(
+      remitente
+    );
+
+    return (
+      "❌ No creé el evento."
+    );
+
+  }
+
+  const dataPrevia =
+    sesion.data || {};
+
+  const titulo =
+    dataPrevia.titulo ||
+    dataPrevia.title ||
+    dataPrevia.Titulo ||
+    "";
+
+  const textoParaGemini =
+    titulo
+      ? `Agrega a mi calendario "${titulo}". ${textoUsuario}`
+      : `Agrega a mi calendario: ${textoUsuario}`;
+
+  const reinterpretacion =
+    await interpretarConGemini(
+      textoParaGemini
+    );
+
+  if (
+    reinterpretacion?.accion ===
+    "cancelar"
+  ) {
+
+    sesiones.delete(
+      remitente
+    );
+
+    return (
+      "❌ No creé el evento."
+    );
+
+  }
+
+  const data =
+    combinarDatos(
+      dataPrevia,
+      reinterpretacion?.data ||
+        {}
+    );
+
+  sesiones.delete(
+    remitente
+  );
+
+  return iniciarCrearEvento(
+    { data },
+    remitente
+  );
+
+}
 async function procesarCrearEventoConfirmacion(
   textoUsuario,
   remitente,
@@ -6884,7 +6960,13 @@ async function procesarSesionPendienteOriginal(
     // ==================================
     // CALENDARIO
     // ==================================
+    case "calendario_datos_faltantes":
 
+      return procesarDatosFaltantesCalendario(
+        textoUsuario,
+        remitente,
+        sesion
+      );
     case "calendario_crear_confirmacion":
 
       return procesarCrearEventoConfirmacion(
