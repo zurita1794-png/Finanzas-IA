@@ -5673,16 +5673,18 @@ function resumenEvento(
 
     data.fecha
       ? `Fecha: ${data.fecha}`
-      : data.start
-        ? `Inicio: ${data.start}`
-        : "",
+      : data.inicio
+        ? `Inicio: ${horaMX(data.inicio)}`
+        : data.start
+          ? `Inicio: ${data.start}`
+          : "",
 
     data.hora
       ? `Hora: ${data.hora}`
       : "",
 
     data.fin
-      ? `Fin: ${data.fin}`
+      ? `Fin: ${horaMX(data.fin)}`
       : data.end
         ? `Fin: ${data.end}`
         : "",
