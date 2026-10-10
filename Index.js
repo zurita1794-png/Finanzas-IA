@@ -5710,47 +5710,195 @@ function fechaMX(iso) {
 }
 
 
+const MESES_ES = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+];
+
+function partesYMD(ymd) {
+
+  const m =
+    String(ymd || "")
+      .match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (!m) return null;
+
+  return {
+    y: Number(m[1]),
+    m: Number(m[2]),
+    d: Number(m[3])
+  };
+
+}
+
+function diasUTC(ymd) {
+
+  const p = partesYMD(ymd);
+
+  return p
+    ? Math.round(
+        Date.UTC(p.y, p.m - 1, p.d) / 86400000
+      )
+    : null;
+
+}
+
+function textoRangoFechas(fechas) {
+
+  const anioActual =
+    Number(fechaMX(new Date()).slice(0, 4));
+
+  const validas =
+    [...new Set(
+      (fechas || []).filter(f => partesYMD(f))
+    )].sort();
+
+  if (!validas.length) return "";
+
+  // Agrupar días consecutivos
+  const rangos = [];
+  let inicio = validas[0];
+  let anterior = validas[0];
+
+  for (let i = 1; i < validas.length; i++) {
+
+    if (diasUTC(validas[i]) - diasUTC(anterior) === 1) {
+
+      anterior = validas[i];
+
+    } else {
+
+      rangos.push([inicio, anterior]);
+      inicio = validas[i];
+      anterior = validas[i];
+
+    }
+
+  }
+
+  rangos.push([inicio, anterior]);
+
+  const conAnio =
+    p => (p.y !== anioActual ? ` de ${p.y}` : "");
+
+  const textos =
+    rangos.map(([a, b]) => {
+
+      const pa = partesYMD(a);
+      const pb = partesYMD(b);
+
+      if (a === b) {
+        return `${pa.d} de ${MESES_ES[pa.m - 1]}${conAnio(pa)}`;
+      }
+
+      if (pa.y === pb.y && pa.m === pb.m) {
+        return `${pa.d} al ${pb.d} de ${MESES_ES[pa.m - 1]}${conAnio(pa)}`;
+      }
+
+      const difAnio = pa.y !== pb.y;
+
+      const ini =
+        `${pa.d} de ${MESES_ES[pa.m - 1]}${difAnio ? ` de ${pa.y}` : ""}`;
+
+      const fin =
+        `${pb.d} de ${MESES_ES[pb.m - 1]}${difAnio ? ` de ${pb.y}` : conAnio(pb)}`;
+
+      return `${ini} al ${fin}`;
+
+    });
+
+  if (textos.length === 1) return textos[0];
+
+  return (
+    textos.slice(0, -1).join(", ") +
+    " y " +
+    textos[textos.length - 1]
+  );
+
+}
+
+function textoHora(hhmm) {
+
+  const m =
+    String(hhmm || "")
+      .match(/^(\d{1,2}):(\d{2})$/);
+
+  if (!m) return "";
+
+  let h = Number(m[1]);
+
+  const sufijo = h >= 12 ? "p.m." : "a.m.";
+
+  h = h % 12 || 12;
+
+  return `${h}:${m[2]} ${sufijo}`;
+
+}
+
+function horaSoloMX(iso) {
+
+  const d = new Date(iso);
+
+  if (Number.isNaN(d.getTime())) return "";
+
+  const hhmm =
+    new Intl.DateTimeFormat(
+      "en-GB",
+      {
+        timeZone: "America/Mexico_City",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23"
+      }
+    ).format(d);
+
+  return textoHora(hhmm);
+
+}
+
 function resumenEvento(
   data
 ) {
 
-  return [
+  data = data || {};
+
+  const titulo =
     data.titulo ||
     data.title ||
-    data.Titulo
-      ? `📅 *${
-          data.titulo ||
-          data.title ||
-          data.Titulo
-        }*`
-      : "",
+    data.Titulo ||
+    "";
 
-       Array.isArray(data.fechas) &&
-    data.fechas.length > 1
-      ? `Fechas: ${data.fechas.join(", ")}`
-      : data.fecha
-        ? `Fecha: ${data.fecha}`
-        : data.inicio
-          ? `Fecha: ${fechaMX(data.inicio)}`
-          : data.start
-            ? `Fecha: ${fechaMX(data.start)}`
-            : "",
+  let fechas = [];
 
-    data.hora
-      ? `Hora: ${data.hora}`
-      : "",
+  if (Array.isArray(data.fechas) && data.fechas.length) {
+    fechas = data.fechas;
+  } else if (data.fecha) {
+    fechas = [data.fecha];
+  } else if (data.inicio) {
+    fechas = [fechaMX(data.inicio)];
+  } else if (data.start) {
+    fechas = [fechaMX(data.start)];
+  }
 
-    data.duracion
-      ? `Duración: ${data.duracion}`
-      : "",
+  let hora = "";
 
-    data.ubicacion
-      ? `Lugar: ${data.ubicacion}`
-      : "",
+  if (data.horaInicio) {
+    hora = textoHora(data.horaInicio);
+  } else if (data.hora) {
+    hora = String(data.hora);
+  } else if (data.inicio && data.todoElDia === false) {
+    hora = horaSoloMX(data.inicio);
+  }
 
-    data.descripcion
-      ? `Descripción: ${data.descripcion}`
-      : ""
+  const cuando =
+    [textoRangoFechas(fechas), hora]
+      .filter(Boolean)
+      .join(" · ");
+
+  return [
+    titulo ? `📅 *${titulo}*` : "",
+    cuando,
+    data.ubicacion ? `📍 ${data.ubicacion}` : ""
   ]
     .filter(Boolean)
     .join("\n");
