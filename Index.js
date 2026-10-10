@@ -6189,9 +6189,9 @@ async function iniciarEliminarEvento(
             evento.fecha ||
             "";
 
-          return `${indice + 1}. *${titulo}*${
+                 return `${indice + 1}. *${titulo}*${
             inicio
-              ? ` — ${inicio}`
+              ? ` — ${fechaMX(inicio)}`
               : ""
           }`;
 
