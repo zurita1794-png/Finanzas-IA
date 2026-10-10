@@ -5767,6 +5767,8 @@ async function ejecutarCalendarioVer(
   interpretacion
 ) {
 
+  console.log("CALENDARIO INTERPRETACION:", JSON.stringify(interpretacion));
+
   const resultado =
     await calendarioListar(
       interpretacion?.timeMin ||
