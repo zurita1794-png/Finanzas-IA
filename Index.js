@@ -5656,6 +5656,22 @@ async function ejecutarMetasResumen() {
 // CALENDARIO
 // ========================================
 
+function fechaMX(iso) {
+
+  if (!iso) return "";
+
+  const d = new Date(iso);
+
+  if (Number.isNaN(d.getTime())) return iso;
+
+  return d.toLocaleDateString(
+    "en-CA",
+    { timeZone: "America/Mexico_City" }
+  );
+
+}
+
+
 function resumenEvento(
   data
 ) {
@@ -5674,20 +5690,14 @@ function resumenEvento(
     data.fecha
       ? `Fecha: ${data.fecha}`
       : data.inicio
-        ? `Inicio: ${horaMX(data.inicio)}`
+        ? `Fecha: ${fechaMX(data.inicio)}`
         : data.start
-          ? `Inicio: ${data.start}`
+          ? `Fecha: ${fechaMX(data.start)}`
           : "",
 
     data.hora
       ? `Hora: ${data.hora}`
       : "",
-
-    data.fin
-      ? `Fin: ${horaMX(data.fin)}`
-      : data.end
-        ? `Fin: ${data.end}`
-        : "",
 
     data.duracion
       ? `Duración: ${data.duracion}`
