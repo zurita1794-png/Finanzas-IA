@@ -1720,9 +1720,47 @@ async function interpretarConGemini(
       prompt
     );
 
-  return extraerJSON(
-    respuesta
-  );
+    const resultado =
+    extraerJSON(
+      respuesta
+    );
+
+  // Varios eventos de calendario en una sola orden
+  if (
+    Array.isArray(resultado) &&
+    resultado.length > 0 &&
+    resultado.every(
+      r =>
+        r?.accion ===
+        "calendario_crear"
+    )
+  ) {
+
+    const fechas =
+      resultado
+        .map(
+          r =>
+            r?.data?.fecha
+        )
+        .filter(Boolean);
+
+    return {
+      accion:
+        "calendario_crear",
+
+      data: {
+        ...resultado[0].data,
+
+        fecha:
+          fechas[0],
+
+        fechas
+      }
+    };
+
+  }
+
+  return resultado;
 
 }
 // ========================================
@@ -5687,13 +5725,16 @@ function resumenEvento(
         }*`
       : "",
 
-    data.fecha
-      ? `Fecha: ${data.fecha}`
-      : data.inicio
-        ? `Fecha: ${fechaMX(data.inicio)}`
-        : data.start
-          ? `Fecha: ${fechaMX(data.start)}`
-          : "",
+       Array.isArray(data.fechas) &&
+    data.fechas.length > 1
+      ? `Fechas: ${data.fechas.join(", ")}`
+      : data.fecha
+        ? `Fecha: ${data.fecha}`
+        : data.inicio
+          ? `Fecha: ${fechaMX(data.inicio)}`
+          : data.start
+            ? `Fecha: ${fechaMX(data.start)}`
+            : "",
 
     data.hora
       ? `Hora: ${data.hora}`
@@ -6110,31 +6151,75 @@ async function procesarCrearEventoConfirmacion(
 
   }
 
-  const resultado =
-    await calendarioCrear(
-      sesion.data
-    );
+  const { fechas: listaFechas, ...base } =
+    sesion.data || {};
+
+  const fechas =
+    Array.isArray(listaFechas) &&
+    listaFechas.length > 0
+      ? listaFechas
+      : [base.fecha];
+
+  const creadas = [];
+  const fallidas = [];
+
+  for (const fecha of fechas) {
+
+    try {
+
+      await calendarioCrear({
+        ...base,
+        fecha
+      });
+
+      creadas.push(fecha);
+
+    } catch (error) {
+
+      console.error(
+        "Error creando evento:",
+        fecha,
+        error
+      );
+
+      fallidas.push(fecha);
+
+    }
+
+  }
 
   sesiones.delete(
     remitente
   );
 
+  if (
+    creadas.length === 0
+  ) {
+
+    return (
+      "⚠️ No pude crear el evento. Intenta nuevamente."
+    );
+
+  }
+
   return [
-    "✅ *Evento creado*",
+    creadas.length > 1
+      ? "✅ *Eventos creados*"
+      : "✅ *Evento creado*",
     "",
-    resumenEvento(
-      sesion.data
-    ),
-    resultado.id
-      ? `ID: ${resultado.id}`
+    resumenEvento({
+      ...base,
+      fecha: creadas[0],
+      fechas: creadas
+    }),
+    fallidas.length
+      ? `\n⚠️ No pude crear: ${fallidas.join(", ")}`
       : ""
   ]
     .filter(Boolean)
     .join("\n");
 
 }
-
-
 // ========================================
 // ELIMINAR EVENTO
 // ========================================
