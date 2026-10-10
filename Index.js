@@ -5708,7 +5708,28 @@ function resumenEvento(
 // ========================================
 // CONSULTAR CALENDARIO
 // ========================================
+function horaMX(iso) {
 
+  if (!iso) return "";
+
+  const d = new Date(iso);
+
+  if (Number.isNaN(d.getTime())) return iso;
+
+  return d.toLocaleString(
+    "es-MX",
+    {
+      timeZone: "America/Mexico_City",
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true
+    }
+  );
+
+}
 function formatearEventosCalendario(
   resultado
 ) {
@@ -5761,10 +5782,10 @@ function formatearEventosCalendario(
         return [
           `*${indice + 1}. ${titulo}*`,
           inicio
-            ? `Inicio: ${inicio}`
+            ? `Inicio: ${horaMX(inicio)}`
             : "",
           fin
-            ? `Fin: ${fin}`
+            ? `Fin: ${horaMX(fin)}`
             : "",
           lugar
             ? `Lugar: ${lugar}`
