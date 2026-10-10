@@ -5809,8 +5809,8 @@ async function ejecutarCalendarioVer(
         20
     );
 
-  return formatearEventosCalendario(
-    resultado
+    return formatearEventosCalendario(
+    resultado?.resultado || resultado
   );
 
 }
