@@ -6125,9 +6125,13 @@ async function iniciarEliminarEvento(
       20
     );
 
+   const datos =
+    resultado?.resultado ||
+    resultado;
+
   const eventos =
-    resultado?.eventos ||
-    resultado?.events ||
+    datos?.eventos ||
+    datos?.events ||
     [];
 
   if (
