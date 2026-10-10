@@ -6147,14 +6147,7 @@ async function iniciarCrearEvento(
       }
     );
 
-    return [
-      "📅 Para crear el evento me falta:",
-      "",
-      ...faltantes.map(
-        campo =>
-          `• ${campo}`
-      )
-    ].join("\n");
+       return `📅 Me falta: ${faltantes.join(", ").toLowerCase()}`;
 
   }
 
@@ -6168,19 +6161,13 @@ async function iniciarCrearEvento(
     }
   );
 
-  return [
-    "📅 *Confirmar evento*",
-    SEPARADOR,
+    return [
     resumenEvento(
       data
     ),
     "",
-    "¿Quieres crear este evento?",
-    "✅ Sí",
-    "❌ No"
-  ]
-    .filter(Boolean)
-    .join("\n");
+    "¿Lo agrego? (sí / no)"
+  ].join("\n");
 
 }
 
@@ -6351,17 +6338,14 @@ async function procesarCrearEventoConfirmacion(
   }
 
   return [
-    creadas.length > 1
-      ? "✅ *Eventos creados*"
-      : "✅ *Evento creado*",
-    "",
+    "✅ Agregado",
     resumenEvento({
       ...base,
       fecha: creadas[0],
       fechas: creadas
     }),
     fallidas.length
-      ? `\n⚠️ No pude crear: ${fallidas.join(", ")}`
+      ? `⚠️ No pude agregar: ${fallidas.join(", ")}`
       : ""
   ]
     .filter(Boolean)
