@@ -1669,6 +1669,56 @@ async function llamadaGemini(
 
 }
 
+
+
+function historialReciente(remitente) {
+// ========================================
+// MEMORIA CORTA DE CONVERSACIÓN
+// ========================================
+
+const HISTORIAL_MAX = 6;
+const HISTORIAL_VIGENCIA_MS = 15 * 60 * 1000;
+const historialConversacion = new Map();
+
+function registrarTurno(remitente, rol, texto) {
+
+  if (!remitente || !texto) return;
+
+  const actual =
+    historialConversacion.get(remitente) || [];
+
+  actual.push({
+    rol,
+    texto: String(texto).slice(0, 600),
+    hora: Date.now()
+  });
+
+  historialConversacion.set(
+    remitente,
+    actual.slice(-HISTORIAL_MAX)
+  );
+
+}
+
+function historialReciente(remitente) {
+
+  const ahora = Date.now();
+
+  const vigente =
+    (historialConversacion.get(remitente) || [])
+      .filter(t => ahora - t.hora <= HISTORIAL_VIGENCIA_MS);
+
+  historialConversacion.set(remitente, vigente);
+
+  return vigente
+    .map(t =>
+      `${t.rol === "usuario" ? "Usuario" : "Asistente"}: ${t.texto}`
+    )
+    .join("\n");
+
+}
+
+
 async function interpretarConGemini(
   texto
 ) {
