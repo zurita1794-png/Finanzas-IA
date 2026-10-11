@@ -1716,7 +1716,8 @@ function historialReciente(remitente) {
 
 
 async function interpretarConGemini(
-  texto
+  texto,
+  remitente = null
 ) {
 
   const ahora = new Date();
@@ -1739,6 +1740,10 @@ async function interpretarConGemini(
       }
     );
 
+    const historial =
+    remitente
+      ? historialReciente(remitente)
+      : "";
   const prompt = [
     instruccionesFinanzas(),
 
@@ -1749,6 +1754,14 @@ async function interpretarConGemini(
     "Usa esta fecha como referencia para 'hoy', 'mañana', 'esta semana', 'este mes', etc.",
     "Nunca inventes otro año ni otra fecha base.",
     "Para timeMin y timeMax usa formato YYYY-MM-DDTHH:mm:ss sin zona horaria ni 'Z'.",
+
+    "",
+
+      historial
+      ? "CONVERSACIÓN RECIENTE (solo contexto; el mensaje actual manda. Úsala para resolver referencias como 'eliminalas', 'esos' o 'el segundo'):"
+      : "",
+
+    historial,
 
     "",
 
