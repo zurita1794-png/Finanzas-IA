@@ -6509,7 +6509,34 @@ async function iniciarEliminarEvento(
     );
 
   }
+  // "eliminalas todas", "borra esos", etc.
+  const textoBuscar =
+    normalizar(buscar).trim();
 
+  const esGenerico =
+    /^(todos|todas|todo|esos|esas|eso|ellos|ellas|(todos|todas)?\s*(los|las)\s+(eventos|actividades))$/
+      .test(textoBuscar);
+
+  if (esGenerico) {
+
+    const mostrados =
+      eventosMostradosVigentes();
+
+    if (!mostrados.length) {
+
+      return (
+        "No tengo una lista reciente. Dime el nombre del evento o pídeme ver tus eventos primero."
+      );
+
+    }
+
+    return procesarCalendarioEliminarSeleccion(
+      "todos",
+      remitente,
+      { eventos: mostrados }
+    );
+
+  }
   const resultado =
     await calendarioBuscar(
       buscar,
