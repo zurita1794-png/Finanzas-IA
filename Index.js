@@ -716,7 +716,11 @@ async function enviarMensajeWhatsApp(
   remitente,
   texto
 ) {
-
+  registrarTurno(
+    remitente,
+    "asistente",
+    texto
+  );
   const mensajes =
     dividirMensaje(
       texto
