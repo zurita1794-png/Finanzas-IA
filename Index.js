@@ -1668,10 +1668,6 @@ async function llamadaGemini(
   return texto;
 
 }
-
-
-
-function historialReciente(remitente) {
 // ========================================
 // MEMORIA CORTA DE CONVERSACIÓN
 // ========================================
