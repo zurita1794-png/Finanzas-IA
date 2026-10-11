@@ -6076,6 +6076,27 @@ function formatearEventosCalendario(
 // VER CALENDARIO
 // ========================================
 
+// Últimos eventos que el bot mostró (vigencia: 15 minutos)
+let eventosMostrados = { eventos: [], hora: 0 };
+
+function recordarEventosMostrados(eventos) {
+
+  eventosMostrados = {
+    eventos: Array.isArray(eventos) ? eventos : [],
+    hora: Date.now()
+  };
+
+}
+
+function eventosMostradosVigentes() {
+
+  return Date.now() - eventosMostrados.hora <= 15 * 60 * 1000
+    ? eventosMostrados.eventos
+    : [];
+
+}
+
+
 async function ejecutarCalendarioVer(
   interpretacion
 ) {
@@ -6094,13 +6115,21 @@ async function ejecutarCalendarioVer(
         20
     );
 
-    return formatearEventosCalendario(
-    resultado?.resultado || resultado
+  const datos =
+    resultado?.resultado ||
+    resultado;
+
+  recordarEventosMostrados(
+    datos?.eventos ||
+    datos?.events ||
+    []
+  );
+
+  return formatearEventosCalendario(
+    datos
   );
 
 }
-
-
 // ========================================
 // BUSCAR EVENTO
 // ========================================
