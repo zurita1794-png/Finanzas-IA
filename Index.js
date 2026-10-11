@@ -7965,10 +7965,17 @@ async function procesarMensaje(
 
   try {
 
-    interpretacion =
+        interpretacion =
       await interpretarConGemini(
-        texto
+        texto,
+        remitente
       );
+
+    registrarTurno(
+      remitente,
+      "usuario",
+      texto
+    );
 console.log(
   "INTERPRETACION GEMINI:",
   JSON.stringify(
